@@ -5,7 +5,7 @@ services:
     container_name: autocar-backend
     restart: always
     ports:
-      - "3000:3000"
+      - "3021:3000"
     environment:
       # Kết nối DB: host là 'db' (vì cùng mạng với supabase)
       # Password phải khớp với file .env bước 1
@@ -24,11 +24,11 @@ services:
       context: ./frontend_autocar
       args:
         # Nếu lên server thật, đổi localhost thành IP Server
-        - VITE_API_URL=http://localhost:3000
+        - VITE_API_URL=http://localhost:3021
     container_name: autocar-frontend
     restart: always
     ports:
-      - "5173:80"
+      - "3020:80"
     networks:
       - supabase_network
 
