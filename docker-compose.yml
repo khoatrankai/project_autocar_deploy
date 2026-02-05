@@ -1,0 +1,40 @@
+services:
+  # --- BACKEND (NestJS) ---
+  backend:
+    build: ./backend
+    container_name: autocar-backend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      # Kết nối DB: host là 'db' (vì cùng mạng với supabase)
+      # Password phải khớp với file .env bước 1
+      - DATABASE_URL=postgresql://postgres:your-super-secret-and-long-postgres-password@db:5432/postgres
+      - SUPABASE_URL=http://kong:8000
+      # Dùng SERVICE_ROLE_KEY từ bước 1
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJhbm9uIiwKICAgICJpc3MiOiAic3VwYWJhc2UtZGVtbyIsCiAgICAiaWF0IjogMTY0MTc2OTIwMCwKICAgICJleHAiOiAxNzk5NTM1NjAwCn0.dc_X5iR_VP_qT0zsiyj_I_OZ2T9FtRU2BBNWN8Bu4GE
+      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyAgCiAgICAicm9sZSI6ICJzZXJ2aWNlX3JvbGUiLAogICAgImlzcyI6ICJzdXBhYmFzZS1kZW1vIiwKICAgICJpYXQiOiAxNjQxNzY5MjAwLAogICAgImV4cCI6IDE3OTk1MzU2MDAKfQ.DaYlNEoUrrEn2Ig7tqibS-PHK5vgusbcbo7X36XVt4Q
+      - PORT=3000
+    networks:
+      - supabase_network
+
+  # --- FRONTEND (Vite) ---
+  frontend:
+    build:
+      context: ./frontend_autocar
+      args:
+        # Nếu lên server thật, đổi localhost thành IP Server
+        - VITE_API_URL=http://localhost:3000
+    container_name: autocar-frontend
+    restart: always
+    ports:
+      - "5173:80"
+    networks:
+      - supabase_network
+
+# --- KẾT NỐI MẠNG ---
+networks:
+  supabase_network:
+    external: true
+    # Tên này mặc định do folder 'supabase/docker' tạo ra
+    name: supabase_default

@@ -1,0 +1,177 @@
+@import "tailwindcss";
+/* @import "tw-animate-css"; */
+/* Cấu hình biến màu sắc cho 3 giao diện:
+  1. Light (Mặc định - :root)
+  2. Dark ([data-theme="dark"])
+  3. Military ([data-theme="military"])
+*/
+
+/* --- 1. LIGHT THEME (Mặc định) --- */
+:root {
+  --background: #f5f7fa; /* nền xám xanh rất nhạt */
+  --item-card: #000000; /* màu item card */
+  --foreground: #1f2937; /* text xám đậm */
+
+  --card: #ffffff;
+  --card-foreground: #1f2937;
+
+  --popover: #ffffff;
+  --popover-foreground: #1f2937;
+
+  --primary: #1d4ed8; /* xanh chính */
+  --primary-foreground: #ffffff;
+
+  --secondary: #e5e7eb; /* xám sáng */
+  --secondary-foreground: #1f2937;
+
+  --muted: #f3f4f6;
+  --muted-foreground: #6b7280;
+
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #93c5fd;
+
+  --sidebar: #f9fafb;
+  --sidebar-foreground: #1f2937;
+
+  /* Chart colors (giữ nguyên hoặc map lại nếu cần) */
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+
+  --radius: 0.625rem;
+}
+
+/* --- 2. DARK THEME --- */
+[data-theme="dark"] {
+  --background: oklch(0.145 0 0);
+  --item-card: #ffffff;
+  --foreground: oklch(0.985 0 0);
+
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+}
+
+/* --- 3. MILITARY THEME --- */
+[data-theme="military"] {
+  --background: #0f1419;
+  --item-card: #e8eaed; /* Đã thêm biến này để tránh lỗi */
+  --foreground: #e8eaed;
+
+  --card: #1a1f2e;
+  --card-foreground: #e8eaed;
+
+  --popover: #1a1f2e; /* Đồng bộ với card */
+  --popover-foreground: #e8eaed;
+
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+
+  --secondary: #1f3a5f;
+  --secondary-foreground: #e8eaed;
+
+  --muted: #4b5563;
+  --muted-foreground: #9ca3af;
+
+  --accent: #3b82f6;
+  --accent-foreground: #ffffff;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --border: #2a3142;
+  --input: #2a3142; /* Đồng bộ với border */
+  --ring: #3b82f6;
+
+  --sidebar: #0f1419;
+  --sidebar-foreground: #e8eaed;
+}
+
+/* --- TAILWIND V4 CONFIG MAPPING --- */
+@theme inline {
+  --font-sans: "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", monospace;
+
+  --color-background: var(--background);
+  --color-item-card: var(--item-card);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --radius: var(--radius);
+}
+
+/* --- BASE STYLES --- */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground transition-colors duration-300; /* Thêm transition cho mượt */
+  }
+}
