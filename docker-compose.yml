@@ -24,7 +24,7 @@ services:
       context: ./frontend_autocar
       args:
         # Nếu lên server thật, đổi localhost thành IP Server
-        - VITE_API_URL=http://localhost:3021
+        - VITE_API_URL=http://103.48.84.245:3021
     container_name: autocar-frontend
     restart: always
     ports:

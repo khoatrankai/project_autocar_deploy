@@ -6,8 +6,8 @@ RUN npm ci
 COPY . .
 
 # Inject biến môi trường vào lúc build
-ARG VITE_API_URL=http://localhost:3000
-ARG VITE_SUPABASE_URL=http://localhost:8000
+ARG VITE_API_URL=http://103.48.84.245:3000
+ARG VITE_SUPABASE_URL=http://103.48.84.245:8000
 # Key này lấy từ file .env ở Bước 1 (ANON_KEY)
 ARG VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzE1MDAwMDAwLCJleHAiOjIwMzAwNjcyMDB9.ExampleAnonSignature_ChangeThisIdeally
 
