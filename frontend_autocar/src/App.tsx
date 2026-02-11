@@ -27,7 +27,7 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<MainLayout />}>
           {/* Trang chủ dashboard (hoặc redirect về products) */}
-          <Route index element={<ProductList />} />
+          <Route index element={<DashboardPage />} />
 
           {/* NHÓM PRODUCTS */}
           {/* Dùng path="products" (relative) để gom nhóm */}
