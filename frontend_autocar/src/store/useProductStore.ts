@@ -10,7 +10,8 @@ interface ProductState {
   error: string | null;
 
   filterOptions: {
-    categories: any[];
+    categories: any[]; // Danh sách phẳng (Cũ)
+    categories_advance: any[]; // Danh sách cây phân cấp (Mới)
     suppliers: any[];
     brands: any[];
     locations: any[];
@@ -45,6 +46,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
 
   filterOptions: {
     categories: [],
+    categories_advance: [], // Khởi tạo mảng rỗng
     suppliers: [],
     brands: [],
     locations: [],
@@ -56,17 +58,13 @@ export const useProductStore = create<ProductState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const params = get().filters;
-      // Gọi API
+      // Gọi API lấy sản phẩm
       const response = await productService.getProducts(params);
-
-      // --- SỬA ĐỔI Ở ĐÂY ---
-      // response = { statusCode: 200, data: { data: [...], meta: {...} } }
-      // Ta cần lấy response.data.data (mảng sp) và response.data.meta (phân trang)
       const result = response.data;
 
       set({
-        products: result.data, // Mảng sản phẩm
-        total: result.meta.total, // Tổng số lượng để phân trang
+        products: result.data,
+        total: result.meta.total,
         isLoading: false,
       });
     } catch (error: any) {
@@ -91,18 +89,25 @@ export const useProductStore = create<ProductState>((set, get) => ({
 
   fetchFilterOptions: async () => {
     try {
-      const [categoriesRes, suppliersRes, brandsRes, locationsRes] =
-        await Promise.all([
-          productService.getCategories(),
-          productService.getSuppliers(),
-          productService.getBrands(),
-          productService.getLocations(),
-        ]);
+      // Gọi song song cả API cũ và API Advance mới
+      const [
+        categoriesRes,
+        categoriesAdvanceRes, // <--- Thêm biến nhận kết quả mới
+        suppliersRes,
+        brandsRes,
+        locationsRes,
+      ] = await Promise.all([
+        productService.getCategories(), // Gọi API findAll cũ
+        productService.getCategoriesAdvance(), // Gọi API findAllAdvance mới
+        productService.getSuppliers(),
+        productService.getBrands(),
+        productService.getLocations(),
+      ]);
 
-      // --- SỬA ĐỔI Ở ĐÂY: Truy cập vào .data của ApiResponse ---
       set({
         filterOptions: {
           categories: categoriesRes.data || [],
+          categories_advance: categoriesAdvanceRes.data || [], // <--- Lưu vào state
           suppliers: suppliersRes.data || [],
           brands: brandsRes.data || [],
           locations: locationsRes.data || [],

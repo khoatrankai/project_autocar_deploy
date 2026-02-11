@@ -10,6 +10,7 @@ import { toast } from "react-hot-toast";
 // Import 2 Modal con
 import CreateCategoryModal from "./modals/CreateCategoryModal";
 import CreateWarehouseModal from "./modals/CreateWarehouseModal";
+import CategorySelector from "../shared/CategorySelector";
 
 interface Props {
   isOpen: boolean;
@@ -206,25 +207,21 @@ export default function CreateProductModal({
                           <PlusCircle size={12} /> Tạo mới
                         </button>
                       </div>
-                      <div className="relative">
-                        <select
-                          name="category_id"
-                          value={formData.category_id}
-                          onChange={handleChange}
-                          className="w-full border border-gray-300 rounded px-3 py-2 text-sm appearance-none outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                        >
-                          <option value="">Chọn nhóm hàng</option>
-                          {filterOptions.categories.map((cat: any) => (
-                            <option key={cat.id} value={cat.id}>
-                              {cat.name}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown
-                          size={16}
-                          className="absolute right-3 top-2.5 text-gray-400 pointer-events-none"
-                        />
-                      </div>
+                      <CategorySelector
+                        // Truyền dữ liệu cây (Advance) vào đây
+                        categories={filterOptions.categories_advance}
+                        // Binding giá trị
+                        value={formData.category_id}
+                        onChange={(newId) =>
+                          setFormData({
+                            ...formData,
+                            category_id: String(newId),
+                          })
+                        }
+                        // Tùy chọn
+                        placeholder="Tìm hoặc chọn nhóm hàng..."
+                        onCreateNew={() => setShowCategoryModal(true)}
+                      />
                     </div>
 
                     {/* THƯƠNG HIỆU (Input + Datalist) */}

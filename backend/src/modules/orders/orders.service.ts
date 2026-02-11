@@ -13,158 +13,209 @@ export class OrdersService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateOrderDto, userId: string) {
-    // userId lấy từ token để ghi log/staff_id
-    // Sử dụng Prisma Transaction để đảm bảo tính toàn vẹn dữ liệu (All or Nothing)
+    const {
+      partner_id,
+      warehouse_id,
+      staff_id,
+      items,
+      paid_amount,
+      discount = 0,
+      payment_method = 'cash',
+      note,
+      code,
+    } = dto;
+
+    // Lấy nhân viên tạo đơn (ưu tiên từ DTO nếu admin tạo hộ, không thì lấy từ token)
+    const finalStaffId = staff_id || userId;
+
+    // Sử dụng Prisma Transaction (All or Nothing)
     return this.prisma.$transaction(async (tx) => {
       // ---------------------------------------------------------
-      // 1. TÍNH TOÁN TỔNG TIỀN
-      // ---------------------------------------------------------
-      const totalAmount = dto.items.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0,
-      );
-
-      // ---------------------------------------------------------
-      // 2. CHECK KHÁCH HÀNG & CÔNG NỢ (Business Logic)
+      // 1. KIỂM TRA KHÁCH HÀNG (Partner Checks)
       // ---------------------------------------------------------
       const partner = await tx.partners.findUnique({
-        where: { id: BigInt(dto.partner_id) },
+        where: { id: BigInt(partner_id) },
       });
 
-      if (!partner) {
-        throw new NotFoundException('Khách hàng không tồn tại');
-      }
-
-      // Logic 1: Check trạng thái khóa
-      if (partner.status === 'locked') {
+      if (!partner) throw new NotFoundException('Khách hàng không tồn tại');
+      if (partner.status === 'locked')
         throw new ForbiddenException('Khách hàng đang bị khóa giao dịch');
+
+      // ---------------------------------------------------------
+      // 2. XỬ LÝ HÀNG HÓA & TỒN KHO (Inventory Loop)
+      // ---------------------------------------------------------
+      let totalAmount = 0;
+
+      // Khai báo kiểu dữ liệu rõ ràng để tránh lỗi 'never'
+      const orderItemsData: Prisma.order_itemsCreateManyOrdersInput[] = [];
+
+      for (const item of items) {
+        const lineTotal = item.quantity * item.price;
+        totalAmount += lineTotal;
+
+        // A. Tìm bản ghi tồn kho
+        const stock = await tx.inventory.findUnique({
+          where: {
+            product_id_warehouse_id: {
+              product_id: BigInt(item.product_id),
+              warehouse_id: BigInt(warehouse_id),
+            },
+          },
+        });
+
+        // B. Check số lượng (Fix lỗi object is possibly null)
+        const currentStock = stock?.quantity ?? 0; // Nếu null thì coi là 0
+
+        if (!stock || currentStock < item.quantity) {
+          const product = await tx.products.findUnique({
+            where: { id: BigInt(item.product_id) },
+          });
+          throw new BadRequestException(
+            `Sản phẩm "${product?.name}" không đủ hàng tại kho này. (Tồn: ${currentStock}, Yêu cầu: ${item.quantity})`,
+          );
+        }
+
+        // C. Trừ tồn kho
+        const newQuantity = currentStock - item.quantity;
+        await tx.inventory.update({
+          where: { id: stock.id },
+          data: { quantity: newQuantity },
+        });
+
+        // D. Ghi Log Kho (Inventory Log) - Bắt buộc để truy vết
+        await tx.inventory_logs.create({
+          data: {
+            warehouse_id: BigInt(warehouse_id),
+            product_id: BigInt(item.product_id),
+            change_amount: -item.quantity, // Số âm vì xuất bán
+            balance_after: newQuantity,
+            type: 'sale',
+            note: `Bán hàng đơn: ${code || 'Mới'}`,
+          },
+        });
+
+        // E. Chuẩn bị data cho Order Items (Snapshot giá & tên)
+        const productInfo = await tx.products.findUnique({
+          where: { id: BigInt(item.product_id) },
+        });
+
+        orderItemsData.push({
+          product_id: BigInt(item.product_id),
+          product_sku: productInfo?.sku,
+          product_name: productInfo?.name,
+          quantity: item.quantity,
+          price: item.price,
+          discount: 0, // Logic giảm giá từng dòng (nếu cần mở rộng sau này)
+        });
       }
 
-      // Logic 2: Check hạn mức nợ
-      // Lưu ý: Prisma trả về Decimal hoặc Number tùy config, ta ép về Number để so sánh
+      // ---------------------------------------------------------
+      // 3. TÍNH TOÁN TÀI CHÍNH (Financial Calculation)
+      // ---------------------------------------------------------
+      // Tổng tiền cuối cùng = Tổng hàng - Giảm giá
+      const finalAmount = Math.max(0, totalAmount - discount);
+
+      // Thay đổi công nợ = Tiền phải trả - Tiền khách đưa
+      // (+): Khách nợ thêm, (-): Khách trả dư/tiền thừa
+      const debtChange = finalAmount - paid_amount;
+
+      // ---------------------------------------------------------
+      // 4. CHECK HẠN MỨC CÔNG NỢ (Debt Limit Check)
+      // ---------------------------------------------------------
       const currentDebt = Number(partner.current_debt || 0);
       const debtLimit = Number(partner.debt_limit || 0);
-      const newDebt = currentDebt + totalAmount;
 
-      if (newDebt > debtLimit) {
+      // Dự kiến nợ mới sau khi giao dịch xong
+      const newDebtForecast = currentDebt + debtChange;
+
+      if (newDebtForecast > debtLimit) {
         throw new BadRequestException(
-          `Vượt hạn mức công nợ cho phép. Nợ hiện tại: ${currentDebt}, Đơn này: ${totalAmount}, Hạn mức: ${debtLimit}`,
+          `Vượt hạn mức nợ. Nợ hiện tại: ${currentDebt.toLocaleString()}, Đơn này nợ thêm: ${debtChange.toLocaleString()}, Hạn mức: ${debtLimit.toLocaleString()}`,
         );
       }
 
       // ---------------------------------------------------------
-      // 3. CHECK & TRỪ TỒN KHO (Inventory Logic)
+      // 5. TẠO ĐƠN HÀNG (Orders)
       // ---------------------------------------------------------
-      // Duyệt qua từng sản phẩm để kiểm tra tồn kho tại warehouse_id cụ thể
-      for (const item of dto.items) {
-        // Tìm bản ghi tồn kho của sản phẩm tại kho cụ thể
-        const inventory = await tx.inventory.findUnique({
-          where: {
-            product_id_warehouse_id: {
-              product_id: BigInt(item.product_id),
-              warehouse_id: BigInt(dto.warehouse_id),
-            },
-          },
-        });
+      const newOrderCode = code || `DH${Date.now()}`;
 
-        // Logic 3: Check số lượng tồn
-        if (!inventory || (inventory.quantity || 0) < item.quantity) {
-          // Lấy tên sản phẩm để báo lỗi cho rõ ràng
-          const productInfo = await tx.products.findUnique({
-            where: { id: BigInt(item.product_id) },
-            select: { name: true },
-          });
-
-          throw new BadRequestException(
-            `Sản phẩm "${productInfo?.name || item.product_id}" tại kho này không đủ hàng. (Tồn: ${inventory?.quantity || 0}, Yêu cầu: ${item.quantity})`,
-          );
-        }
-
-        // Action 1: Trừ tồn kho ngay lập tức
-        await tx.inventory.update({
-          where: {
-            product_id_warehouse_id: {
-              product_id: BigInt(item.product_id),
-              warehouse_id: BigInt(dto.warehouse_id),
-            },
-          },
-          data: {
-            quantity: { decrement: item.quantity },
-          },
-        });
-      }
-
-      // ---------------------------------------------------------
-      // 4. TẠO ĐƠN HÀNG (Create Order)
-      // ---------------------------------------------------------
-      // Tự sinh mã đơn hàng nếu không truyền (VD: ORD + Timestamp)
-      const orderCode = dto.code || `ORD${Date.now()}`;
-
-      const order = await tx.orders.create({
+      const newOrder = await tx.orders.create({
         data: {
-          code: orderCode,
-          partner_id: BigInt(dto.partner_id),
-          warehouse_id: BigInt(dto.warehouse_id), // Quan trọng: Ghi nhận đơn hàng xuất từ kho nào
-          staff_id: dto.staff_id || userId, // Nhân viên tạo đơn (hoặc lấy từ token)
+          code: newOrderCode,
+          partner_id: BigInt(partner_id),
+          warehouse_id: BigInt(warehouse_id),
+          staff_id: finalStaffId,
           total_amount: totalAmount,
-          final_amount: totalAmount, // Chưa tính discount
-          paid_amount: 0, // Mới tạo chưa thanh toán
-          status: 'completed', // Mặc định completed theo schema của bạn
-          note: dto.note,
+          discount: discount,
+          final_amount: finalAmount,
+          paid_amount: paid_amount,
+          status: 'completed',
+          note: note,
+          // Tạo luôn items trong cú pháp create của order (Clean hơn)
+          order_items: {
+            createMany: {
+              data: orderItemsData,
+            },
+          },
         },
       });
 
       // ---------------------------------------------------------
-      // 5. TẠO ORDER ITEMS
+      // 6. CẬP NHẬT PARTNER (Partners)
       // ---------------------------------------------------------
-      for (const item of dto.items) {
-        // Lấy thông tin sản phẩm để snapshot (Lưu cứng tên/sku vào thời điểm mua)
-        const product = await tx.products.findUnique({
-          where: { id: BigInt(item.product_id) },
-        });
-
-        await tx.order_items.create({
+      // Chỉ update nếu có phát sinh doanh số hoặc công nợ
+      if (finalAmount > 0 || debtChange !== 0) {
+        await tx.partners.update({
+          where: { id: BigInt(partner_id) },
           data: {
-            order_id: order.id,
-            product_id: BigInt(item.product_id),
-            product_name: product?.name, // Snapshot name
-            product_sku: product?.sku, // Snapshot SKU
-            quantity: item.quantity,
-            price: item.price,
-            discount: 0,
+            current_debt: { increment: debtChange }, // Cộng thêm phần nợ mới (hoặc trừ đi nếu trả dư)
+            total_revenue: { increment: finalAmount }, // Cộng dồn doanh số mua hàng
           },
         });
       }
 
       // ---------------------------------------------------------
-      // 6. CẬP NHẬT CÔNG NỢ KHÁCH HÀNG
+      // 7. TẠO PHIẾU THU (Transactions)
       // ---------------------------------------------------------
-      await tx.partners.update({
-        where: { id: BigInt(dto.partner_id) },
-        data: {
-          current_debt: { increment: totalAmount }, // Cộng dồn nợ
-          total_revenue: { increment: totalAmount }, // Cộng doanh số
-        },
-      });
+      if (paid_amount > 0) {
+        await tx.transactions.create({
+          data: {
+            code: `PT${Date.now()}`,
+            amount: paid_amount,
+            type: 'receipt', // Thu tiền
+            payment_method: payment_method,
+            partner_id: BigInt(partner_id),
+            order_id: newOrder.id,
+            staff_id: finalStaffId,
+            note: `Thu tiền đơn hàng ${newOrderCode}`,
+            // category_id: ... (nếu có loại thu chi)
+          },
+        });
+      }
 
       // ---------------------------------------------------------
-      // 7. GHI LOG HOẠT ĐỘNG (Activity Logs)
+      // 8. LOG ADMIN (Activity Logs) - Optional
       // ---------------------------------------------------------
+      const staffProfile = await tx.profiles.findUnique({
+        where: { id: finalStaffId },
+      });
+      console.log(staffProfile);
       await tx.activity_logs.create({
         data: {
-          user_id: userId, // ID người thực hiện
+          user_id: userId,
+          user_name: staffProfile?.full_name || 'Nhân viên', // <--- THÊM DÒNG NÀY
           action: 'CREATE_ORDER',
           entity: 'orders',
-          entity_id: order.id.toString(),
+          entity_id: newOrder.id.toString(),
           details: {
-            code: orderCode,
-            amount: totalAmount,
-            partner_id: dto.partner_id,
+            code: newOrderCode,
+            final_amount: finalAmount,
+            debt_change: debtChange,
           },
         },
       });
 
-      return order;
+      return newOrder;
     });
   }
 

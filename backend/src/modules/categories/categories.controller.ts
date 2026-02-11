@@ -28,6 +28,11 @@ export class CategoriesController {
     return this.service.create(dto);
   }
 
+  @Get('advance')
+  findAllAdvance() {
+    return this.service.findAllAdvance();
+  }
+
   @Get()
   findAll() {
     return this.service.findAll();

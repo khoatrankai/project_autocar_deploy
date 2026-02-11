@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Modal,
@@ -27,6 +28,8 @@ import dayjs from "dayjs";
 import { useProductStore } from "../../../store/useProductStore";
 import { useAuthStore } from "../../../store/useAuthStore";
 import { usePurchaseOrderStore } from "../../../store/usePurchaseOrderStore";
+import { useManagerStore } from "../../../store/useManager";
+// import { useManagerStore } from "../../../store/useManager";
 
 interface CreateModalProps {
   open: boolean;
@@ -45,11 +48,13 @@ export default function CreateStockTransferModal({
   const { user } = useAuthStore();
   const { filterOptions } = useProductStore(); // Lấy danh sách kho từ locations
   const { filterOptions: filterPurchase } = usePurchaseOrderStore(); // Lấy danh sách nhân viên
-
+  const { warehouse_manager } = useManagerStore(); // Lấy danh sách nhân viên
+  // const { warehouse_manager } = useManagerStore();
   // Local State
   const [items, setItems] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [valueSearch, setValueSearch] = useState("");
 
   // State UI
   const [sourceWarehouseId, setSourceWarehouseId] = useState<number | null>(
@@ -104,7 +109,13 @@ export default function CreateStockTransferModal({
         search: value,
         limit: 10,
         page: 1,
+        locationIds: form.getFieldValue("from_warehouse_id")
+          ? form.getFieldValue("from_warehouse_id")
+          : warehouse_manager
+            ? [warehouse_manager]
+            : undefined,
       });
+      setValueSearch(value);
       setProducts(res.data?.data || []);
     } catch (error) {
       console.error(error);
@@ -189,6 +200,13 @@ export default function CreateStockTransferModal({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (form.getFieldValue("from_warehouse_id")) {
+      console.log("bam ni");
+      handleSearchProduct(valueSearch);
+    }
+  }, [form.getFieldValue("from_warehouse_id")]);
 
   // Columns Table
   const columns = [

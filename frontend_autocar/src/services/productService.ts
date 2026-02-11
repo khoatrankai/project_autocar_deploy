@@ -23,6 +23,12 @@ export const productService = {
     return response.data;
   },
 
+  getCategoriesAdvance: async (): Promise<ApiResponse<any[]>> => {
+    const response = await axiosClient.get(`/categories/advance`);
+
+    return response.data;
+  },
+
   getSuppliers: async (): Promise<ApiResponse<any[]>> => {
     const response = await axiosClient.get(`/partners?type=supplier`);
     return response.data?.data;

@@ -25,7 +25,7 @@ export enum PartnerStatus {
 export class CreatePartnerDto {
   @ApiProperty({ example: 'KH001', description: 'Mã đối tác (Duy nhất)' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   code: string;
 
   @ApiProperty({ example: 'Gara Ô tô Tuấn Phát' })

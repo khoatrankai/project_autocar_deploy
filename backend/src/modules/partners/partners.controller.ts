@@ -37,6 +37,7 @@ import {
 import { SupabaseGuard } from 'src/auth/supabase.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { FilterSupplierDto } from './dto/filter-supplier.dto';
+import { FilterCustomerDto } from './dto/filter-customer.dto';
 
 // Giả định bạn có AuthGuard và RolesGuard
 // import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -47,7 +48,9 @@ import { FilterSupplierDto } from './dto/filter-supplier.dto';
 // Interface user mock (Thay thế bằng interface thật của bạn)
 interface UserPayload {
   id: string;
-  role: 'admin' | 'accountant' | 'sale' | 'warehouse';
+  user_metadata: {
+    role: 'admin' | 'accountant' | 'sale' | 'warehouse';
+  };
 }
 
 @ApiTags('Partners (Khách hàng & NCC)')
@@ -78,12 +81,25 @@ export class PartnersController {
     return this.partnersService.findAll(filter, mockUser);
   }
 
+  @Get('customer')
+  findAllCustomer(@Query() query: FilterCustomerDto) {
+    return this.partnersService.findAllCustomer(query);
+  }
+
   @Get('groups')
   @ApiOperation({
     summary: 'Lấy danh sách nhóm nhà cung cấp (distinct group_name)',
   })
   getGroups() {
     return this.partnersService.getPartnerGroups();
+  }
+
+  @Get('groups-customer')
+  @ApiOperation({
+    summary: 'Lấy danh sách nhóm khách hàng (distinct group_name)',
+  })
+  getGroupsCustomer() {
+    return this.partnersService.getPartnerGroupsCustomer();
   }
 
   @Get('supplier')
@@ -126,6 +142,18 @@ export class PartnersController {
   @ApiOperation({ summary: 'Tạo mới đối tác với đầy đủ thông tin' })
   create(@Body() createPartnerDto: CreatePartnerDto) {
     return this.partnersService.create(createPartnerDto);
+  }
+
+  @Post('supplier')
+  @ApiOperation({ summary: 'Tạo mới đối tác với đầy đủ thông tin' })
+  createSupplier(@Body() createPartnerDto: CreatePartnerDto) {
+    return this.partnersService.createSupplier(createPartnerDto);
+  }
+
+  @Post('customer')
+  @ApiOperation({ summary: 'Tạo mới khách hàng với đầy đủ thông tin' })
+  createCustomer(@Body() createPartnerDto: CreatePartnerDto) {
+    return this.partnersService.createCustomer(createPartnerDto);
   }
 
   // -------------------------------------------------------
@@ -190,6 +218,28 @@ export class PartnersController {
   // -------------------------------------------------------
   // Xóa (Soft delete)
   // -------------------------------------------------------
+
+  @Delete('bulk')
+  // @Roles('admin') // Bật cái này nếu dùng Guard thật
+  @ApiBearerAuth() // <--- Hiện ổ khóa trên Swagger
+  @UseGuards(SupabaseGuard) // <--- Kích hoạt bảo vệ
+  @ApiOperation({
+    summary: 'Xóa đối tác (Chuyển trạng thái sang Locked - Chỉ Admin)',
+  })
+  removeMany(
+    @Body('ids') ids: string[],
+    @Req() req,
+    // @CurrentUser() user: UserPayload,
+  ) {
+    // MOCK USER: Giả lập là Admin để test được
+    const mockAdmin: UserPayload = req.user;
+
+    // Nếu muốn test lỗi Forbidden, hãy thử đổi role thành 'sale'
+    // const mockSale: UserPayload = { id: 'sale-id', role: 'sale' };
+
+    return this.partnersService.removeMany(ids, mockAdmin);
+  }
+
   @Delete(':id')
   // @Roles('admin') // Bật cái này nếu dùng Guard thật
   @ApiBearerAuth() // <--- Hiện ổ khóa trên Swagger

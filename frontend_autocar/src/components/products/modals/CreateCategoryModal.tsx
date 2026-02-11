@@ -1,13 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { productService } from "../../../services/productService";
 import { toast } from "react-hot-toast";
+import { useProductStore } from "../../../store/useProductStore"; // Import Store
+import CategorySelector from "../../shared/CategorySelector";
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void; // Để reload lại list danh mục bên ngoài
+  onSuccess: () => void;
 }
 
 export default function CreateCategoryModal({
@@ -15,8 +17,19 @@ export default function CreateCategoryModal({
   onClose,
   onSuccess,
 }: Props) {
+  // Lấy danh sách cây category từ store
+  const { filterOptions, fetchFilterOptions } = useProductStore();
+
   const [name, setName] = useState("");
+  const [parentId, setParentId] = useState<string | number | null>(null); // State lưu category cha
   const [loading, setLoading] = useState(false);
+
+  // Đảm bảo load dữ liệu nếu store đang rỗng
+  useEffect(() => {
+    if (isOpen && filterOptions.categories_advance.length === 0) {
+      fetchFilterOptions();
+    }
+  }, [isOpen, fetchFilterOptions, filterOptions.categories_advance.length]);
 
   if (!isOpen) return null;
 
@@ -28,11 +41,22 @@ export default function CreateCategoryModal({
 
     setLoading(true);
     try {
-      await productService.createCategory({ name });
+      // Gửi payload gồm tên và parent_id
+      await productService.createCategory({
+        name,
+        parent_id: Number(parentId), // Backend cần xử lý trường này
+      });
+
       toast.success("Tạo nhóm hàng thành công!");
-      onSuccess(); // Refresh list
+      onSuccess();
+
+      // Reset form
       setName("");
+      setParentId(null);
       onClose();
+
+      // Reload lại store để cập nhật danh sách mới ngay lập tức
+      fetchFilterOptions();
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Lỗi tạo nhóm hàng");
     } finally {
@@ -51,23 +75,42 @@ export default function CreateCategoryModal({
         </div>
 
         <div className="space-y-4">
+          {/* 1. Nhập Tên */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Tên nhóm hàng
+              Tên nhóm hàng <span className="text-red-500">*</span>
             </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:ring-1 focus:ring-blue-500"
-              placeholder="VD: Hệ thống gầm"
+              className="w-full border border-gray-300 rounded px-3 py-2 outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              placeholder="VD: Lọc gió"
               autoFocus
             />
+          </div>
+
+          {/* 2. Chọn Nhóm Cha (Sử dụng CategorySelector mới) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Thuộc nhóm (Cha)
+            </label>
+            <CategorySelector
+              categories={filterOptions.categories_advance} // Truyền cây dữ liệu
+              value={parentId}
+              onChange={(val: any) => setParentId(val)}
+              placeholder="-- Là nhóm gốc --"
+              allowClear={true} // Cho phép chọn lại làm nhóm gốc
+              className="w-full"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">
+              Để trống nếu là nhóm hàng cấp cao nhất
+            </p>
           </div>
 
           <button
             disabled={loading}
             onClick={handleSubmit}
-            className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex justify-center items-center gap-2"
+            className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex justify-center items-center gap-2 mt-2"
           >
             {loading && <Loader2 size={16} className="animate-spin" />}
             Lưu

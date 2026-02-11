@@ -14,11 +14,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/shared/prisma/prisma.service';
 import * as ExcelJS from 'exceljs';
 import { FilterSupplierDto } from './dto/filter-supplier.dto';
+import { FilterCustomerDto } from './dto/filter-customer.dto';
 
 // Interface giả định cho User (lấy từ request)
 interface UserPayload {
   id: string; // UUID
-  role: 'admin' | 'accountant' | 'sale' | 'warehouse';
+  user_metadata: {
+    role: 'admin' | 'accountant' | 'sale' | 'warehouse';
+  };
 }
 
 @Injectable()
@@ -36,6 +39,56 @@ export class PartnersService {
           email: dto.email,
           address: dto.address,
           type: dto.type,
+          group_name: dto.group_name,
+          assigned_staff_id: dto.assigned_staff_id,
+          status: dto.status || 'active',
+          debt_limit: dto.debt_limit || 0,
+          notes: dto.notes,
+          current_debt: 0,
+          total_revenue: 0,
+        },
+      });
+    } catch (error) {
+      this.handlePrismaError(error, dto.code);
+    }
+  }
+
+  async createSupplier(dto: CreatePartnerDto) {
+    const generatedCode = `SP${Date.now().toString().slice(-6)}`;
+    try {
+      return await this.prisma.partners.create({
+        data: {
+          code: dto.code !== '' ? dto.code : generatedCode,
+          name: dto.name,
+          phone: dto.phone,
+          email: dto.email,
+          address: dto.address,
+          type: 'supplier',
+          group_name: dto.group_name,
+          assigned_staff_id: dto.assigned_staff_id,
+          status: dto.status || 'active',
+          debt_limit: dto.debt_limit || 0,
+          notes: dto.notes,
+          current_debt: 0,
+          total_revenue: 0,
+        },
+      });
+    } catch (error) {
+      this.handlePrismaError(error, dto.code);
+    }
+  }
+
+  async createCustomer(dto: CreatePartnerDto) {
+    const generatedCode = `KH${Date.now().toString().slice(-6)}`;
+    try {
+      return await this.prisma.partners.create({
+        data: {
+          code: dto.code !== '' ? dto.code : generatedCode,
+          name: dto.name,
+          phone: dto.phone,
+          email: dto.email,
+          address: dto.address,
+          type: 'customer',
           group_name: dto.group_name,
           assigned_staff_id: dto.assigned_staff_id,
           status: dto.status || 'active',
@@ -114,7 +167,7 @@ export class PartnersService {
 
     // 1. Phân quyền dữ liệu (Ai được xem khách hàng nào)
     let roleCondition: Prisma.partnersWhereInput = {};
-    if (user.role === 'sale') {
+    if (user.user_metadata.role === 'sale') {
       roleCondition = {
         OR: [{ assigned_staff_id: user.id }, { assigned_staff_id: null }],
       };
@@ -192,7 +245,7 @@ export class PartnersService {
     // 6. SANITIZE DATA (Xử lý ẩn hiện cột nhạy cảm theo Role)
     // "Các mục này chỉ có account Ban lãnh đạo mới xem"
     const safePartners = partners.map((p) =>
-      this.sanitizePartner(p, user.role),
+      this.sanitizePartner(p, user.user_metadata.role),
     );
 
     return {
@@ -246,7 +299,7 @@ export class PartnersService {
   // 5. Phân bổ khách hàng (Chỉ Admin)
   async assignStaff(id: number, staffId: string, user: UserPayload) {
     // Check quyền
-    if (user.role !== 'admin') {
+    if (user.user_metadata.role !== 'admin') {
       throw new ForbiddenException(
         'Chỉ Admin mới có quyền phân bổ khách hàng.',
       );
@@ -270,7 +323,7 @@ export class PartnersService {
     user: UserPayload,
   ) {
     // Check quyền
-    if (user.role !== 'admin') {
+    if (user.user_metadata.role !== 'admin') {
       throw new ForbiddenException(
         'Chỉ Admin mới có quyền khóa/mở khóa khách hàng.',
       );
@@ -300,7 +353,7 @@ export class PartnersService {
 
   async remove(id: number, user: UserPayload) {
     // 1. Check quyền Admin
-    if (user.role !== 'admin') {
+    if (user.user_metadata.role !== 'admin') {
       throw new ForbiddenException('Chỉ Admin mới có quyền xóa khách hàng.');
     }
 
@@ -317,6 +370,28 @@ export class PartnersService {
         status: 'locked',
         // Có thể thêm logic: đổi tên thêm hậu tố [DELETED] để giải phóng mã code nếu cần
         // code: `${partner.code}_DEL_${Date.now()}`
+      },
+    });
+  }
+
+  async removeMany(ids: string[], user: UserPayload) {
+    // 1. Check quyền Admin
+    console.log(user);
+    if (user?.user_metadata?.role !== 'admin') {
+      throw new ForbiddenException('Chỉ Admin mới có quyền xóa khách hàng.');
+    }
+
+    // 2. Chuẩn bị ID
+    const bigIntIds = ids.map((id) => BigInt(id));
+
+    // 3. Thực hiện Update Many
+    // Sửa: Dùng updateMany thay vì update
+    return this.prisma.partners.updateMany({
+      where: {
+        id: { in: bigIntIds }, // updateMany chấp nhận toán tử 'in'
+      },
+      data: {
+        status: 'locked', // Khóa tài khoản (Soft Delete)
       },
     });
   }
@@ -489,6 +564,28 @@ export class PartnersService {
     return groups.map((g) => g.group_name).filter(Boolean);
   }
 
+  async getPartnerGroupsCustomer() {
+    // Lấy các group_name duy nhất, chỉ của 'supplier' (hoặc 'partner')
+    const groups = await this.prisma.partners.findMany({
+      where: {
+        // Lưu ý: Kiểm tra DB xem bạn lưu là 'supplier' hay 'partner'
+        // type: { in: ['supplier', 'partner'] },
+        type: 'customer', // Giả sử DB lưu là supplier
+        group_name: { not: null }, // Bỏ qua null
+      },
+      distinct: ['group_name'], // Chỉ lấy duy nhất
+      select: {
+        group_name: true,
+      },
+      orderBy: {
+        group_name: 'asc',
+      },
+    });
+
+    // Trả về mảng string đơn giản: ['Lốp xe', 'Phụ tùng', ...]
+    return groups.map((g) => g.group_name).filter(Boolean);
+  }
+
   async findAllSupplier(query: FilterSupplierDto) {
     const {
       page = 1,
@@ -587,5 +684,133 @@ export class PartnersService {
         total_pages: Math.ceil(total / limit),
       },
     };
+  }
+
+  async findAllCustomer(query: FilterCustomerDto) {
+    const {
+      page,
+      limit,
+      search,
+      groupName,
+      creatorId,
+      startDate,
+      endDate,
+      customerType,
+      status,
+    } = query;
+
+    // 1. Phân trang
+    const pageNum = Number(page) || 1;
+    const limitNum = Number(limit) || 20;
+    const skip = (pageNum - 1) * limitNum;
+
+    // 2. Xây dựng điều kiện Where
+    const where: Prisma.partnersWhereInput = {
+      // Mặc định chỉ lấy type là customer (loại trừ nhà cung cấp)
+      // Nếu logic của bạn lưu "company" vào type thì bỏ dòng này hoặc sửa thành 'in'
+      type: 'customer',
+    };
+
+    // --- Filter Search (Tên, Mã, SĐT, Email) ---
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // --- Filter Nhóm khách hàng ---
+    if (groupName) {
+      where.group_name = groupName;
+    }
+
+    // --- Filter Người tạo (Nhân viên phụ trách) ---
+    if (creatorId) {
+      where.assigned_staff_id = creatorId; // UUID
+    }
+
+    // --- Filter Ngày tạo ---
+    if (startDate || endDate) {
+      where.created_at = {};
+      if (startDate) where.created_at.gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        where.created_at.lte = end;
+      }
+    }
+
+    // --- Filter Loại khách hàng (Logic tùy biến do thiếu field) ---
+    if (customerType) {
+      // Giả sử bạn lưu loại khách (Cá nhân/Công ty) vào trường group_name hoặc 1 trường custom
+      // where.group_name = customerType;
+    }
+    if (status && status !== 'all') {
+      where.status = status;
+    }
+
+    // 3. Thực hiện Query song song (Lấy list + Đếm tổng + Tính tổng tiền)
+    const [list, total, aggregation] = await Promise.all([
+      // A. Lấy danh sách
+      this.prisma.partners.findMany({
+        where,
+        include: {
+          profiles: {
+            // Join lấy tên nhân viên phụ trách
+            select: { full_name: true },
+          },
+        },
+        orderBy: { created_at: 'desc' }, // Mới nhất lên đầu
+        skip,
+        take: limitNum,
+      }),
+
+      // B. Đếm tổng số bản ghi (Pagination)
+      this.prisma.partners.count({ where }),
+
+      // C. Tính tổng Nợ và Tổng Bán (Hiển thị trên Header bảng)
+      this.prisma.partners.aggregate({
+        where,
+        _sum: {
+          current_debt: true, // Nợ hiện tại
+          total_revenue: true, // Tổng bán
+        },
+      }),
+    ]);
+
+    // 4. Serialize (Convert BigInt/Decimal sang String/Number)
+    const serializedList = this.serialize(list);
+
+    // Convert Decimal sang Number cho frontend dễ dùng
+    const totalDebt = Number(aggregation._sum.current_debt || 0);
+    const totalRevenue = Number(aggregation._sum.total_revenue || 0);
+
+    // Tính "Tổng bán trừ trả hàng" (Nếu cần query thêm bảng returns, nhưng ở đây tạm lấy total_revenue)
+    const netRevenue = totalRevenue;
+
+    return {
+      data: serializedList,
+      meta: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+      summary: {
+        totalDebt, // Nợ hiện tại (Số màu đỏ trong hình)
+        totalRevenue, // Tổng bán
+        netRevenue, // Tổng bán trừ trả hàng
+      },
+    };
+  }
+
+  private serialize(data: any): any {
+    return JSON.parse(
+      JSON.stringify(data, (key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
+    );
   }
 }

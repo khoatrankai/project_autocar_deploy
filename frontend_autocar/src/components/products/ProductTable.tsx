@@ -26,7 +26,7 @@ import ProductDetailModal from "./ProductDetailModal";
 const COLUMN_CONFIG = [
   { key: "image", label: "Hình ảnh", default: true },
   { key: "sku", label: "SKU", default: true },
-  { key: "oem_code", label: "Mã hàng", default: true },
+  // { key: "oem_code", label: "Mã hàng", default: true },
   { key: "name", label: "Tên hàng", default: true },
   { key: "category_name", label: "Nhóm hàng", default: true },
   { key: "cost_price", label: "Giá vốn", default: true },
@@ -393,11 +393,11 @@ export default function ProductTable() {
                     {visibleColumns.sku && (
                       <th className="p-4 font-semibold text-gray-600">SKU</th>
                     )}
-                    {visibleColumns.oem_code && (
+                    {/* {visibleColumns.oem_code && (
                       <th className="p-4 font-semibold text-gray-600">
                         Mã hàng
                       </th>
-                    )}
+                    )} */}
                     {visibleColumns.name && (
                       <th className="p-4 font-semibold text-gray-600">
                         Tên hàng

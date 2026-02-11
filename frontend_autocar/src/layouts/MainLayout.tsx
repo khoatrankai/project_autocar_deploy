@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable react-hooks/set-state-in-effect */
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react"; // Thêm useEffect, useState
@@ -21,6 +22,7 @@ import {
 import { ThemeSwitcher } from "../components/shared/ThemeSwitcher";
 import { useAuthStore } from "../store/useAuthStore";
 import { useProductStore } from "../store/useProductStore"; // Import Store
+import { useManagerStore } from "../store/useManager";
 
 // --- DỮ LIỆU MENU MEGA (Giữ nguyên) ---
 const PRODUCT_MENU = [
@@ -57,7 +59,8 @@ export default function MainLayout() {
   const { user, logout } = useAuthStore();
 
   // 1. Lấy danh sách kho từ store
-  const { filterOptions } = useProductStore();
+  const { filterOptions, fetchFilterOptions } = useProductStore();
+  const { setWarehouseManager, warehouse_manager } = useManagerStore();
 
   // 2. State lưu chi nhánh đang chọn
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,13 +69,15 @@ export default function MainLayout() {
   // 3. Logic khởi tạo và đồng bộ LocalStorage
   useEffect(() => {
     const locations = filterOptions?.locations || [];
-
     // Thử lấy từ LocalStorage
-    const savedBranch = localStorage.getItem("selected_branch");
-
+    const savedBranch = localStorage.getItem("selected_branch") as any;
+    console.log("vao ch", savedBranch);
     if (savedBranch) {
       try {
         const parsed = JSON.parse(savedBranch);
+        console.log("v2");
+        setWarehouseManager(parsed?.id);
+        console.log("oke ");
         // Kiểm tra xem branch đã lưu có còn tồn tại trong danh sách mới không (optional)
         setSelectedBranch(parsed);
       } catch (e) {
@@ -85,14 +90,26 @@ export default function MainLayout() {
       const defaultBranch = locations[0];
       setSelectedBranch(defaultBranch);
       localStorage.setItem("selected_branch", JSON.stringify(defaultBranch));
+      console.log("v1");
+      setWarehouseManager(defaultBranch?.id);
+      console.log("oke 1");
     }
   }, [filterOptions?.locations]); // Chạy lại khi danh sách kho thay đổi
 
+  useEffect(() => {
+    fetchFilterOptions();
+  }, []);
+
+  useEffect(() => {
+    console.log(warehouse_manager, "day11");
+  }, [warehouse_manager]);
   // 4. Hàm xử lý khi chọn chi nhánh
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleSelectBranch = (branch: any) => {
     setSelectedBranch(branch);
     localStorage.setItem("selected_branch", JSON.stringify(branch));
+    console.log("v3");
+    setWarehouseManager(branch?.id);
     // Có thể thêm window.location.reload() nếu cần refresh dữ liệu toàn trang theo kho
   };
 
