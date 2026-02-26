@@ -349,4 +349,200 @@ export class OrdersService {
       ),
     );
   }
+
+  async getDailySales(targetDate: Date) {
+    const startOfDay = new Date(targetDate.setHours(0, 0, 0, 0));
+    const endOfDay = new Date(targetDate.setHours(23, 59, 59, 999));
+
+    return this.prisma.orders.findMany({
+      where: {
+        created_at: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+      include: {
+        partners: { select: { name: true, phone: true } }, // Ai mua
+        order_items: {
+          include: { products: { select: { name: true, sku: true } } }, // Mua món gì
+        },
+      },
+    });
+  }
+
+  async calculateRevenueAndProfit(
+    startDate: Date,
+    endDate: Date,
+    staffId?: string,
+  ) {
+    // 1. Tính TỔNG BÁN RA trong khoảng thời gian
+    const orders = await this.prisma.orders.findMany({
+      where: {
+        created_at: { gte: startDate, lte: endDate },
+        status: 'completed',
+        ...(staffId && { staff_id: staffId }), // Lọc theo nhân viên nếu có
+      },
+      include: {
+        order_items: {
+          include: { products: { select: { cost_price: true } } },
+        },
+      },
+    });
+
+    let grossRevenue = 0;
+    let totalCost = 0;
+
+    for (const order of orders) {
+      grossRevenue += Number(order.final_amount);
+
+      // Tính giá vốn (cost) của đơn hàng
+      const orderCost = order.order_items.reduce((sum, item) => {
+        return (
+          sum + Number(item.quantity) * Number(item.products?.cost_price || 0)
+        );
+      }, 0);
+      totalCost += orderCost;
+    }
+
+    // 2. Tính TỔNG TRẢ LẠI (Giải quyết bài toán tháng N+1 trả hàng của tháng N)
+    // Hệ thống sẽ quét các phiếu trả hàng ĐƯỢC TẠO TRONG KỲ NÀY, bất kể đơn gốc từ bao giờ.
+    const returns = await this.prisma.returns.findMany({
+      where: {
+        created_at: { gte: startDate, lte: endDate },
+        status: 'completed',
+        // Nếu tính cho nhân viên, ta phải join ngược về order để biết đơn này của ai bán
+        ...(staffId && { orders: { staff_id: staffId } }),
+      },
+      include: {
+        return_items: {
+          include: { products: { select: { cost_price: true } } },
+        },
+      },
+    });
+
+    let returnRevenueDeduction = 0; // Số tiền doanh thu bị trừ đi do trả hàng
+    let returnCostRecovery = 0; // Số tiền vốn được hoàn lại (do lấy lại hàng)
+
+    for (const ret of returns) {
+      returnRevenueDeduction += Number(ret.total_refund);
+
+      const retCost = ret.return_items.reduce((sum, item) => {
+        return (
+          sum + Number(item.quantity) * Number(item.products?.cost_price || 0)
+        );
+      }, 0);
+      returnCostRecovery += retCost;
+    }
+
+    // 3. CHỐT SỐ LIỆU CUỐI CÙNG (NET)
+    const netRevenue = grossRevenue - returnRevenueDeduction;
+    const netCost = totalCost - returnCostRecovery;
+    const netProfit = netRevenue - netCost;
+
+    return {
+      period: { start: startDate, end: endDate },
+      staffId: staffId || 'ALL_COMPANY',
+      grossRevenue, // Doanh thu thô (chưa trừ trả hàng)
+      returnDeduction: returnRevenueDeduction, // Tiền bị hoàn trả
+      netRevenue, // DOANH THU THỰC TẾ (Để tính lương)
+      netCost, // Vốn thực tế
+      netProfit, // LỢI NHUẬN THỰC TẾ
+    };
+  }
+
+  async getOverdueDebts(allowedDebtDays: number = 30) {
+    // Tính ngày giới hạn: Ví dụ đơn hàng trước ngày này mà chưa trả hết là quá hạn
+    const deadlineDate = new Date();
+    deadlineDate.setDate(deadlineDate.getDate() - allowedDebtDays);
+
+    return this.prisma.orders.findMany({
+      where: {
+        status: 'completed',
+        created_at: { lt: deadlineDate }, // Đơn hàng tạo trước thời hạn
+        paid_amount: { lt: this.prisma.orders.fields.final_amount }, // Trả chưa đủ
+      },
+      include: {
+        partners: { select: { name: true, phone: true } },
+        profiles: { select: { full_name: true } }, // Sale phụ trách
+      },
+    });
+  }
+
+  async calculateDetailedPayroll(staffId: string, month: number, year: number) {
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0, 23, 59, 59); // Ngày cuối tháng
+
+    // 1. Lấy thông tin đơn hàng của nhân viên trong tháng
+    const orders = await this.prisma.orders.findMany({
+      where: {
+        staff_id: staffId,
+        created_at: { gte: startDate, lte: endDate },
+        status: 'completed', // Ràng buộc đúng chuẩnƠP
+      },
+      include: { order_items: { include: { products: true } } },
+    });
+
+    let totalRevenue = 0; // Tổng thu (bao gồm VAT)
+    let netRevenue = 0; // Doanh thu thực (không tính VAT)
+    let totalCost = 0; // Tổng giá vốn
+    let totalVat = 0; // Tổng tiền VAT phải nộp
+    let staffGrabFee = 0; // Tổng phí Grab Sale phải chịu
+    let companyGrabFee = 0; // Tổng phí Grab Công ty chịu
+
+    for (const order of orders) {
+      const orderFinalAmount = Number(order.final_amount);
+      totalRevenue += orderFinalAmount;
+
+      // Xử lý VAT (Tác vụ 6)
+      if (order.has_vat) {
+        totalVat += Number(order.vat_amount);
+        netRevenue += orderFinalAmount - Number(order.vat_amount);
+      } else {
+        netRevenue += orderFinalAmount;
+      }
+
+      // Xử lý Phí Grab (Tác vụ 5)
+      if (order.shipping_payer === 'staff') {
+        staffGrabFee += Number(order.shipping_fee);
+      } else {
+        companyGrabFee += Number(order.shipping_fee);
+      }
+
+      // Tính giá vốn
+      const orderCost = order.order_items.reduce(
+        (sum, item) =>
+          sum + Number(item.quantity) * Number(item.products?.cost_price || 0),
+        0,
+      );
+      totalCost += orderCost;
+    }
+
+    // Lợi nhuận cho Sale = Doanh thu thực - Vốn - Phí Grab Sale chịu
+    const profitForSale = netRevenue - totalCost - staffGrabFee;
+
+    // 2. Lấy chỉ tiêu KPI (Tác vụ 7)
+    const target = await this.prisma.sales_targets.findUnique({
+      where: { staff_id_month_year: { staff_id: staffId, month, year } },
+    });
+    const targetRevenue = target ? Number(target.target_revenue) : 0;
+    const isTargetAchieved = netRevenue >= targetRevenue;
+
+    return {
+      staffId,
+      month,
+      year,
+      totalRevenue,
+      totalVat, // Để kế toán xuất VAT
+      netRevenue, // Doanh thu tính hoa hồng
+      totalCost,
+      staffGrabFee, // Trừ vào lương Sale
+      companyGrabFee, // Chi phí công ty
+      profitForSale, // Lợi nhuận để nhân chia % hoa hồng
+      kpi: {
+        target: targetRevenue,
+        achieved: netRevenue,
+        passed: isTargetAchieved,
+      },
+    };
+  }
 }

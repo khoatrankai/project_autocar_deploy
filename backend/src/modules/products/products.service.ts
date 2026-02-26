@@ -176,7 +176,7 @@ export class ProductsService {
         orderBy: { created_at: 'desc' },
         include: {
           categories: { select: { name: true } }, // Lấy tên nhóm hàng
-          supplier: { select: { name: true } }, // Lấy tên nhà cung cấp
+          partners: { select: { name: true } }, // Lấy tên nhà cung cấp
           inventory: {
             // Lấy tồn kho và vị trí
             select: {
@@ -365,7 +365,7 @@ export class ProductsService {
         orderBy: { created_at: 'desc' },
         include: {
           categories: { select: { name: true } },
-          supplier: { select: { name: true } },
+          partners: { select: { name: true } },
 
           // --- QUAN TRỌNG: CHỈ LẤY INVENTORY CỦA KHO ĐƯỢC CHỌN ---
           inventory: {
@@ -415,7 +415,7 @@ export class ProductsService {
 
         // Relation names
         category_name: item.categories?.name,
-        supplier_name: item.supplier?.name,
+        supplier_name: item.partners?.name,
 
         // --- KẾT QUẢ QUAN TRỌNG ---
         total_quantity: currentFilteredQuantity, // Tổng này thay đổi theo bộ lọc kho
@@ -470,7 +470,7 @@ export class ProductsService {
         categories: true,
         product_compatibility: true,
         inventory: { include: { warehouses: true } },
-        supplier: true, // <--- THÊM DÒNG NÀY (Lấy thông tin nhà cung cấp)
+        partners: true, // <--- THÊM DÒNG NÀY (Lấy thông tin nhà cung cấp)
       },
     });
 

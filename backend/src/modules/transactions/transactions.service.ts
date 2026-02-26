@@ -33,4 +33,34 @@ export class TransactionsService {
       orderBy: { transaction_date: 'desc' },
     });
   }
+
+  async collectDebt(
+    partnerId: bigint,
+    staffId: string,
+    amount: number,
+    paymentMethod: string,
+    note: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const updatedPartner = await tx.partners.update({
+        where: { id: partnerId },
+        data: { current_debt: { decrement: amount } },
+      });
+      console.log('vao day', updatedPartner);
+      const transaction = await tx.transactions.create({
+        data: {
+          code: `COLLECT${Date.now()}`,
+          // ĐÃ ĐIỀU CHỈNH: Bắt buộc dùng 'receipt' (Phiếu thu) theo check constraint
+          type: 'receipt',
+          amount: amount,
+          payment_method: paymentMethod,
+          partner_id: partnerId,
+          staff_id: staffId,
+          note: note,
+        },
+      });
+      console.log('vao day2', transaction);
+      return { updatedPartner, transaction };
+    });
+  }
 }

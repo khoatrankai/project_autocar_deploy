@@ -26,6 +26,7 @@ import { UsersModule } from './modules/users/users.module';
 import { StockTransfersModule } from './modules/stock-transfers/stock-transfers.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { SalesTargetsModule } from './modules/sales-targets/sales-targets.module';
 // Sau này bạn sẽ import thêm AuthModule, ProductsModule vào đây
 
 @Module({
@@ -56,6 +57,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     StockTransfersModule,
     ProfilesModule,
     DashboardModule,
+    SalesTargetsModule,
   ],
   controllers: [AppController, UploadController],
   providers: [AppService, SupabaseService],

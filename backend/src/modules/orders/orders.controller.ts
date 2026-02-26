@@ -6,6 +6,10 @@ import {
   UseGuards,
   Req,
   Param,
+  Query,
+  BadRequestException,
+  ParseIntPipe,
+  DefaultValuePipe,
   // Req, // Dùng cái này nếu có Auth thật
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
@@ -63,6 +67,61 @@ export class OrdersController {
   @ApiOperation({ summary: 'Lấy danh sách đơn hàng' })
   findAll() {
     return this.ordersService.findAll();
+  }
+
+  @Get('daily-sales')
+  async getDailySales(@Query('date') dateString: string) {
+    if (!dateString)
+      throw new BadRequestException(
+        'Vui lòng truyền tham số date (YYYY-MM-DD)',
+      );
+    const targetDate = new Date(dateString);
+    return await this.ordersService.getDailySales(targetDate);
+  }
+
+  @Get('revenue-and-profit')
+  async getRevenueAndProfit(
+    @Query('startDate') startDateStr: string,
+    @Query('endDate') endDateStr: string,
+    @Query('staffId') staffId?: string,
+  ) {
+    if (!startDateStr || !endDateStr) {
+      throw new BadRequestException(
+        'Yêu cầu startDate và endDate (YYYY-MM-DD)',
+      );
+    }
+    const startDate = new Date(startDateStr);
+    const endDate = new Date(endDateStr);
+
+    // Set thời gian để lấy trọn vẹn ngày cuối
+    endDate.setHours(23, 59, 59, 999);
+
+    return await this.ordersService.calculateRevenueAndProfit(
+      startDate,
+      endDate,
+      staffId,
+    );
+  }
+
+  @Get('payroll')
+  async getDetailedPayroll(
+    @Query('staffId') staffId: string,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('year', ParseIntPipe) year: number,
+  ) {
+    if (!staffId) throw new BadRequestException('Vui lòng truyền staffId');
+    return await this.ordersService.calculateDetailedPayroll(
+      staffId,
+      month,
+      year,
+    );
+  }
+
+  @Get('debts/overdue')
+  async getOverdueDebts(
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+  ) {
+    return await this.ordersService.getOverdueDebts(days);
   }
 
   @Get(':id')

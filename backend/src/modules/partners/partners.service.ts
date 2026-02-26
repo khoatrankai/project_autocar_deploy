@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   CreatePartnerDto,
@@ -812,5 +813,59 @@ export class PartnersService {
         typeof value === 'bigint' ? value.toString() : value,
       ),
     );
+  }
+
+  async validateDebtLimit(partnerId: bigint, newOrderDebtAmount: number) {
+    const partner = await this.prisma.partners.findUnique({
+      where: { id: partnerId },
+      select: {
+        current_debt: true,
+        debt_limit: true,
+        name: true,
+        status: true,
+      },
+    });
+
+    if (!partner) throw new BadRequestException('Khách hàng không tồn tại');
+
+    // Đảm bảo khách hàng đang 'active' (dựa theo enum của partners)
+    if (partner.status === 'locked') {
+      throw new BadRequestException('Tài khoản khách hàng này đang bị khóa.');
+    }
+
+    const totalExpectedDebt = Number(partner.current_debt) + newOrderDebtAmount;
+    if (totalExpectedDebt > Number(partner.debt_limit)) {
+      throw new BadRequestException(
+        `Không thể bán chịu. Khách hàng ${partner.name} đã vượt hạn mức công nợ.`,
+      );
+    }
+    return true;
+  }
+
+  async getCustomersWithDebt() {
+    return this.prisma.partners.findMany({
+      where: {
+        current_debt: { gt: 0 },
+        status: 'active', // Chỉ lấy khách hàng đang active
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        phone: true,
+        current_debt: true,
+        orders: {
+          where: {
+            status: 'completed', // Bỏ qua pending, cancelled, returned khi tính nợ
+          },
+          select: {
+            code: true,
+            total_amount: true,
+            paid_amount: true,
+            created_at: true,
+          },
+        },
+      },
+    });
   }
 }

@@ -333,4 +333,99 @@ export class ReturnsService {
       count: result.count,
     };
   }
+
+  async processReturnAndOffsetDebt(data: CreateReturnDto, staff_id: string) {
+    // 1. Tính tổng tiền cần hoàn trả (cấn trừ)
+    const totalRefund = data.items.reduce(
+      (sum, item) => sum + item.quantity * item.refund_price,
+      0,
+    );
+
+    // 2. Thực thi Transaction để đảm bảo tính toàn vẹn dữ liệu
+    return await this.prisma.$transaction(async (tx) => {
+      // 2.1 Kiểm tra đơn hàng và khách hàng có tồn tại không
+      const order = await tx.orders.findUnique({
+        where: { id: data.order_id ? BigInt(data.order_id) : undefined },
+      });
+      const partner = await tx.partners.findUnique({
+        where: { id: data.partner_id },
+      });
+
+      if (!order || !partner) {
+        throw new BadRequestException(
+          'Đơn hàng hoặc khách hàng không tồn tại trong hệ thống.',
+        );
+      }
+
+      // 2.2 Tạo phiếu Trả hàng (Returns) và Chi tiết trả hàng (Return_Items)
+      const newReturn = await tx.returns.create({
+        data: {
+          code: `RET${Date.now()}`, // Bạn có thể dùng hàm tạo mã code chuẩn hơn
+          order_id: data.order_id ? BigInt(data.order_id) : undefined,
+          partner_id: data.partner_id,
+          total_refund: totalRefund,
+          reason: data.reason,
+          status: 'completed',
+          return_items: {
+            create: data.items.map((item) => ({
+              product_id: item.product_id,
+              quantity: item.quantity,
+              refund_price: item.refund_price,
+            })),
+          },
+        },
+      });
+
+      // 2.3 Xử lý CẤN TRỪ CÔNG NỢ (Tuyệt chiêu xử lý cả TH1 và TH2 trong 1 logic)
+      /*
+       * Giải thích:
+       * - TH1 (Khách chưa thanh toán, đang nợ): current_debt đang là số dương lớn. Trừ đi khoản này sẽ làm giảm nợ.
+       * - TH2 (Khách đã thanh toán, hết nợ): current_debt đang = 0. Trừ đi khoản này current_debt sẽ thành SỐ ÂM.
+       * (Số âm có nghĩa là Hệ thống đang nợ lại khách/khách có tiền dư. Lần mua hàng tiếp theo hệ thống tự động cộng dồn số âm này vào đơn mới).
+       */
+      await tx.partners.update({
+        where: { id: data.partner_id },
+        data: {
+          current_debt: {
+            decrement: totalRefund, // Giảm công nợ hiện tại
+          },
+        },
+      });
+
+      // 2.4 Ghi nhận lịch sử giao dịch (Transactions) để kế toán dễ đối soát
+      await tx.transactions.create({
+        data: {
+          code: `TRANS${Date.now()}`,
+          type: 'return_offset', // Loại giao dịch: Cấn trừ trả hàng
+          amount: totalRefund,
+          payment_method: 'system_offset', // Cấn trừ trên hệ thống
+          partner_id: data.partner_id,
+          order_id: data.order_id ? BigInt(data.order_id) : undefined,
+          return_id: newReturn.id,
+          staff_id: staff_id,
+          note: `Hoàn trả hàng và tự động cấn trừ công nợ cho đơn hàng ${order.code}`,
+        },
+      });
+
+      // 2.5 (Tùy chọn) Hoàn lại Tồn kho (Inventory)
+      // Nếu chính sách công ty là hàng trả lại sẽ được cộng lại vào kho
+      for (const item of data.items) {
+        // Tìm kho đang lưu sản phẩm này (giả sử lấy kho đầu tiên chứa sản phẩm hoặc phải truyền warehouseId từ client)
+        const inventoryRecord = await tx.inventory.findFirst({
+          where: { product_id: item.product_id },
+        });
+
+        if (inventoryRecord) {
+          await tx.inventory.update({
+            where: { id: inventoryRecord.id },
+            data: {
+              quantity: { increment: item.quantity },
+            },
+          });
+        }
+      }
+
+      return newReturn;
+    });
+  }
 }

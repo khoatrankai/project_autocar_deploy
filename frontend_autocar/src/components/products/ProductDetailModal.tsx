@@ -410,14 +410,14 @@ export default function ProductDetailModal({
             </Form.Item>
           ) : (
             <div className="text-sm text-gray-600 font-medium">
-              {product?.supplier ? (
+              {product?.partners ? (
                 <>
                   <span className="font-bold text-gray-800 mr-2">
-                    {product.supplier.name}
+                    {product.partners.name}
                   </span>
-                  {product.supplier.code && (
+                  {product.partners.code && (
                     <span className="text-xs bg-gray-200 px-1 rounded">
-                      {product.supplier.code}
+                      {product.partners.code}
                     </span>
                   )}
                 </>

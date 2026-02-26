@@ -34,4 +34,8 @@ export const returnService = {
   deleteMany: (ids: string[]) => {
     return axiosClient.delete(`${ENDPOINT}/bulk`, { data: { ids } });
   },
+  processReturn: async (payload: any) => {
+    const response = await axiosClient.post("/return/process", payload);
+    return response.data;
+  },
 };

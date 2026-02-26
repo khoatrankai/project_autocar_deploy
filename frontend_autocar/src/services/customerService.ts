@@ -64,4 +64,16 @@ export const customerService = {
 
     return response.data;
   },
+  getCustomersWithDebt: async () => {
+    const response = await axiosClient.get("/partners/debts/customers");
+    return response.data;
+  },
+
+  validateDebtLimit: async (payload: { partnerId: string; amount: number }) => {
+    const response = await axiosClient.post(
+      "/partners/debts/validate-limit",
+      payload,
+    );
+    return response.data;
+  },
 };

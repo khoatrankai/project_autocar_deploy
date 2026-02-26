@@ -16,6 +16,7 @@ import {
   ParseFilePipe,
   MaxFileSizeValidator,
   FileTypeValidator,
+  BadRequestException,
 } from '@nestjs/common';
 import { PartnersService } from './partners.service';
 import {
@@ -313,5 +314,25 @@ export class PartnersController {
 
     // 3. Gửi buffer về client
     res.send(buffer);
+  }
+
+  @Get('debts/customers')
+  async getCustomersWithDebt() {
+    return await this.partnersService.getCustomersWithDebt();
+  }
+
+  @Post('debts/validate-limit')
+  async validateDebtLimit(
+    @Body('partnerId') partnerId: string,
+    @Body('amount') amount: number,
+  ) {
+    if (!partnerId || amount === undefined) {
+      throw new BadRequestException('Yêu cầu partnerId và amount');
+    }
+    // Chuyển partnerId thành BigInt để gọi Service
+    return await this.partnersService.validateDebtLimit(
+      BigInt(partnerId),
+      amount,
+    );
   }
 }
