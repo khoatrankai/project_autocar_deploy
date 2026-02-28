@@ -98,4 +98,19 @@ export class ProductsController {
   async posSearch(@Query() query: PosSearchProductDto) {
     return this.service.posSearch(query);
   }
+
+  @Put('brands/:oldName')
+  async updateBrand(
+    @Param('oldName') oldName: string,
+    @Body('newName') newName: string,
+  ) {
+    const result = await this.service.updateBrand(oldName, newName);
+    return { success: true, ...result };
+  }
+
+  @Delete('brands/:name')
+  async deleteBrand(@Param('name') name: string) {
+    const result = await this.service.deleteBrand(name);
+    return { success: true, ...result };
+  }
 }

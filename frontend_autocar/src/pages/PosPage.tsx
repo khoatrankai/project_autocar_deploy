@@ -27,6 +27,7 @@ import { usePurchaseOrderStore } from "../store/usePurchaseOrderStore";
 import CreateCustomerModal from "../components/customers/modals/CreateCustomerModal";
 import { orderService } from "../services/orderService";
 import { useManagerStore } from "../store/useManager";
+import { useAuthStore } from "../store/useAuthStore";
 
 export default function PosPage() {
   const {
@@ -47,12 +48,13 @@ export default function PosPage() {
     setNote,
     resetActiveInvoice,
   } = usePosStore();
-
+  const { user } = useAuthStore();
   const {
     filterOptions: { staffs },
     fetchFilterOptions,
   } = usePurchaseOrderStore();
   const { warehouse_manager } = useManagerStore();
+
   // 1. Lấy dữ liệu của hóa đơn đang active
   const activeData = getActiveInvoice();
   const cart = activeData?.cart || [];
@@ -99,13 +101,12 @@ export default function PosPage() {
 
   // Sync tiền khách trả mặc định = tổng tiền
   useEffect(() => {
-    setAmountPaid(totalPayment);
+    // setAmountPaid(totalPayment);
   }, [totalPayment, activeInvoiceId]);
 
   // --- HANDLERS ---
   const handleSearchProduct = async (keyword: string) => {
     setProductSearch(keyword);
-    console.log(warehouse_manager, "vao day");
     if (keyword.trim().length > 1) {
       try {
         const res = await productService.getProducts({
@@ -160,14 +161,12 @@ export default function PosPage() {
       return toast.error("Giỏ hàng đang trống!");
     }
 
-    // Nếu có lỗi "báo đỏ" (hết hàng, lỗ vốn) -> Chặn luôn (như yêu cầu trước)
     if (hasError) {
       return toast.error(
         "Đơn hàng có lỗi (Hết hàng hoặc Lỗ vốn), vui lòng kiểm tra lại!",
       );
     }
 
-    // Bắt buộc chọn khách hàng (nếu backend yêu cầu partner_id not null)
     if (!selectedPartner) {
       return toast.error("Vui lòng chọn khách hàng để thanh toán!");
     }
@@ -175,46 +174,29 @@ export default function PosPage() {
     setIsProcessing(true);
 
     try {
-      // 2. CHUẨN BỊ PAYLOAD (Dữ liệu gửi đi)
-      // Map dữ liệu từ Store (Zustand) sang cấu trúc DTO của Backend
       const payload = {
-        code: `DH${Date.now()}`, // Hoặc để null để Backend tự sinh
-        partner_id: Number(selectedPartner.id), // Backend nhận Int/BigInt
-        staff_id: selectedStaff?.id || undefined, // Nếu không chọn thì để Backend tự lấy user login
-        warehouse_id: 1, // ID kho hiện tại (Thường lấy từ cấu hình shop hoặc user session)
-
-        // Tiền nong
+        code: `DH${Date.now()}`,
+        partner_id: Number(selectedPartner.id),
+        staff_id: selectedStaff?.id || undefined,
+        warehouse_id: 1, // ID kho hiện tại
         discount: discount,
-        paid_amount: amountPaid, // Số tiền khách đưa
-        payment_method: paymentMethod, // 'cash', 'transfer', 'card'
-        note: note, // Ghi chú đơn
-
-        // Danh sách sản phẩm
+        paid_amount: amountPaid,
+        payment_method: paymentMethod,
+        note: note,
         items: cart.map((item) => ({
           product_id: Number(item.product_id),
           quantity: item.quantity,
-          price: item.price, // Giá bán thực tế (đã sửa trên UI)
+          price: item.price,
         })),
       };
 
-      // 3. GỌI API
       const response = await orderService.create(payload);
-
-      // 4. XỬ LÝ THÀNH CÔNG
       toast.success(`Thanh toán thành công! Mã đơn: ${response.code}`);
 
-      // (Optional) Mở tab mới để in hóa đơn
-      // window.open(`/print/invoice/${response.id}`, '_blank');
-
-      // 5. RESET TAB HIỆN TẠI
       resetActiveInvoice();
     } catch (error: any) {
-      // 6. XỬ LÝ LỖI TỪ BACKEND
-      // Backend trả về: { message: "Vượt hạn mức nợ...", error: "Bad Request", ... }
       const errorMessage =
         error.response?.data?.message || "Lỗi khi tạo đơn hàng";
-
-      // Nếu message là mảng (class-validator) thì lấy cái đầu tiên
       const displayMsg = Array.isArray(errorMessage)
         ? errorMessage[0]
         : errorMessage;
@@ -227,8 +209,10 @@ export default function PosPage() {
   };
 
   useEffect(() => {
-    console.log(warehouse_manager, "day");
-  }, [warehouse_manager]);
+    if (user && staffs) {
+      setStaff(staffs.find((s: any) => s.id === user.id));
+    }
+  }, [user, staffs]);
 
   return (
     <div className="flex h-full w-full bg-gray-100 overflow-hidden text-sm font-sans">
@@ -386,7 +370,6 @@ export default function PosPage() {
                         </td>
                         <td className="p-2 font-medium text-gray-800">
                           {item.name}
-                          {/* CẢNH BÁO TỒN KHO */}
                           {isLowStock && (
                             <div className="flex items-center gap-1 text-[10px] text-red-600 font-bold mt-0.5 animate-pulse">
                               <AlertCircle size={10} /> Hết hàng (Tồn:{" "}
@@ -415,18 +398,26 @@ export default function PosPage() {
                         <td className="p-2 text-right">
                           <div className="relative">
                             <input
-                              type="number"
+                              type="text"
+                              placeholder="0"
                               className={`w-28 text-right border-b border-dashed border-gray-300 focus:border-blue-500 outline-none bg-transparent py-1 font-medium ${isLowPrice ? "text-red-600 font-bold" : ""}`}
-                              value={item.price}
-                              onChange={(e) =>
+                              value={
+                                item.price
+                                  ? item.price.toLocaleString("vi-VN")
+                                  : ""
+                              }
+                              onChange={(e) => {
+                                const rawValue = e.target.value.replace(
+                                  /\D/g,
+                                  "",
+                                );
                                 updateCartItem(
                                   item.product_id,
                                   "price",
-                                  Number(e.target.value),
-                                )
-                              }
+                                  Number(rawValue),
+                                );
+                              }}
                             />
-                            {/* CẢNH BÁO GIÁ VỐN */}
                             {isLowPrice && (
                               <div className="flex items-center justify-end gap-1 text-[9px] text-red-600 font-bold absolute right-0 -bottom-3 whitespace-nowrap">
                                 <AlertTriangle size={8} /> Thấp hơn giá vốn
@@ -515,12 +506,47 @@ export default function PosPage() {
                       {selectedPartner.phone}
                     </div>
 
-                    {/* HIỂN THỊ NỢ CŨ */}
-                    <div className="mt-1 flex items-center gap-1">
-                      <span className="text-[10px] text-red-500 bg-red-50 px-1 rounded border border-red-100">
-                        Nợ cũ:{" "}
-                        {formatMoney(Number(selectedPartner.current_debt))}
-                      </span>
+                    {/* HIỂN THỊ CÔNG NỢ & NỢ GẦN NHẤT */}
+                    <div className="mt-1 flex flex-col gap-1.5">
+                      {/* Tổng nợ hiện tại */}
+                      {Number(selectedPartner.current_debt) > 0 && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] text-red-500 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 font-medium">
+                            Tổng nợ:{" "}
+                            {formatMoney(Number(selectedPartner.current_debt))}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Nợ của đơn hàng gần nhất (Có thể click xem chi tiết) */}
+                      {selectedPartner.latest_order &&
+                        selectedPartner.latest_order.debt_amount > 0 && (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Bạn chỉnh lại link /orders/... sao cho khớp với route app của bạn nhé
+                                window.open(
+                                  `/orders/${selectedPartner.latest_order.id}`,
+                                  "_blank",
+                                );
+                              }}
+                              className="text-[10px] text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200 hover:bg-orange-100 hover:border-orange-300 flex items-center gap-1 transition-colors text-left w-max"
+                              title={`Xem chi tiết đơn hàng ${selectedPartner.latest_order.code}`}
+                            >
+                              <span className="underline font-medium hover:text-orange-700">
+                                Nợ đơn {selectedPartner.latest_order.code}:
+                              </span>{" "}
+                              <span className="font-bold">
+                                {formatMoney(
+                                  Number(
+                                    selectedPartner.latest_order.debt_amount,
+                                  ),
+                                )}
+                              </span>
+                            </button>
+                          </div>
+                        )}
                     </div>
                   </div>
                 </div>
@@ -582,7 +608,7 @@ export default function PosPage() {
                               : "text-green-600"
                           }
                         >
-                          Nợ: {formatMoney(Number(cus.current_debt))}
+                          Tổng nợ: {formatMoney(Number(cus.current_debt))}
                         </span>
                       </div>
                     </div>
@@ -617,10 +643,13 @@ export default function PosPage() {
             <span className="text-gray-600">Giảm giá</span>
             <div className="flex items-center bg-white border border-gray-300 rounded w-32 h-8 px-2 focus-within:border-blue-500">
               <input
-                type="number"
+                type="text"
                 className="w-full text-right outline-none bg-transparent font-medium text-gray-800 text-sm"
-                value={discount}
-                onChange={(e) => setDiscount(Number(e.target.value))}
+                value={discount ? discount.toLocaleString("vi-VN") : ""}
+                onChange={(e) => {
+                  const rawValue = e.target.value.replace(/\D/g, "");
+                  setDiscount(Number(rawValue));
+                }}
               />
             </div>
           </div>

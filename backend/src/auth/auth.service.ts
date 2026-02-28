@@ -58,6 +58,7 @@ export class AuthService {
       });
 
     if (error) {
+      console.log(error);
       throw new UnauthorizedException('Email hoặc mật khẩu không chính xác');
     }
 

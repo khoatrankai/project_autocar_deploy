@@ -219,13 +219,37 @@ export class OrdersService {
     });
   }
 
-  async findAll() {
+  async findAll(query: { startDate?: string; endDate?: string } = {}) {
+    const { startDate, endDate } = query;
+
+    // Khởi tạo điều kiện where rỗng
+    const where: Prisma.ordersWhereInput = {};
+
+    // Nếu có truyền ngày thì thêm điều kiện lọc
+    if (startDate || endDate) {
+      where.created_at = {};
+
+      if (startDate) {
+        // Lấy từ đầu ngày của startDate (nếu frontend truyền chuẩn ISO thì không cần setHours)
+        where.created_at.gte = new Date(startDate);
+      }
+
+      if (endDate) {
+        const end = new Date(endDate);
+        // Đảm bảo lấy đến cuối ngày (23:59:59.999) của ngày kết thúc
+        // (Rất quan trọng nếu frontend chỉ truyền dạng 'YYYY-MM-DD')
+        end.setHours(23, 59, 59, 999);
+        where.created_at.lte = end;
+      }
+    }
+
     return this.prisma.orders.findMany({
+      where, // Truyền điều kiện lọc vào đây
       include: {
         order_items: true,
         partners: { select: { name: true, phone: true } },
-        warehouses: { select: { name: true } }, // Join thêm tên kho
-        profiles: { select: { full_name: true } }, // Tên nhân viên
+        warehouses: { select: { name: true } },
+        profiles: { select: { full_name: true } },
       },
       orderBy: { created_at: 'desc' },
     });

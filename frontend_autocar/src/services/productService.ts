@@ -81,6 +81,23 @@ export const productService = {
     return response.data;
   },
 
+  updateCategory: async (
+    id: string | number,
+    data: {
+      name?: string;
+      slug?: string;
+      parent_id?: number | string | null;
+    },
+  ) => {
+    const response = await axiosClient.patch(`/categories/${id}`, data);
+    return response.data;
+  },
+
+  deleteCategory: async (id: string | number) => {
+    const response = await axiosClient.delete(`/categories/${id}`);
+    return response.data;
+  },
+
   // 2. Tạo Kho/Vị trí (Warehouse)
   createWarehouse: async (data: {
     name: string;
@@ -131,5 +148,22 @@ export const productService = {
   update: async (productId: any, data: any) => {
     const response = await axiosClient.put(`/products/${productId}`, data);
     return response.data?.data;
+  },
+
+  // Đổi tên Brand (Sẽ đổi tên tất cả sản phẩm có brand này)
+  updateBrand: async (oldName: string, newName: string) => {
+    const response = await axiosClient.put(
+      `/products/brands/${encodeURIComponent(oldName)}`,
+      { newName },
+    );
+    return response.data;
+  },
+
+  // Xóa Brand (Và xóa toàn bộ sản phẩm thuộc brand này)
+  deleteBrand: async (brandName: string) => {
+    const response = await axiosClient.delete(
+      `/products/brands/${encodeURIComponent(brandName)}`,
+    );
+    return response.data;
   },
 };

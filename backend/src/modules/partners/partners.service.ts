@@ -31,10 +31,14 @@ export class PartnersService {
 
   // 1. Tạo mới Partner (Standard)
   async create(dto: CreatePartnerDto) {
+    const generatedCode =
+      dto.type === 'supplier'
+        ? `SP${Date.now().toString().slice(-6)}`
+        : `KH${Date.now().toString().slice(-6)}`;
     try {
       return await this.prisma.partners.create({
         data: {
-          code: dto.code,
+          code: dto.code || generatedCode,
           name: dto.name,
           phone: dto.phone,
           email: dto.email,
@@ -707,12 +711,9 @@ export class PartnersService {
 
     // 2. Xây dựng điều kiện Where
     const where: Prisma.partnersWhereInput = {
-      // Mặc định chỉ lấy type là customer (loại trừ nhà cung cấp)
-      // Nếu logic của bạn lưu "company" vào type thì bỏ dòng này hoặc sửa thành 'in'
       type: 'customer',
     };
 
-    // --- Filter Search (Tên, Mã, SĐT, Email) ---
     if (search) {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -722,17 +723,9 @@ export class PartnersService {
       ];
     }
 
-    // --- Filter Nhóm khách hàng ---
-    if (groupName) {
-      where.group_name = groupName;
-    }
+    if (groupName) where.group_name = groupName;
+    if (creatorId) where.assigned_staff_id = creatorId;
 
-    // --- Filter Người tạo (Nhân viên phụ trách) ---
-    if (creatorId) {
-      where.assigned_staff_id = creatorId; // UUID
-    }
-
-    // --- Filter Ngày tạo ---
     if (startDate || endDate) {
       where.created_at = {};
       if (startDate) where.created_at.gte = new Date(startDate);
@@ -743,53 +736,87 @@ export class PartnersService {
       }
     }
 
-    // --- Filter Loại khách hàng (Logic tùy biến do thiếu field) ---
     if (customerType) {
-      // Giả sử bạn lưu loại khách (Cá nhân/Công ty) vào trường group_name hoặc 1 trường custom
       // where.group_name = customerType;
     }
     if (status && status !== 'all') {
       where.status = status;
     }
 
-    // 3. Thực hiện Query song song (Lấy list + Đếm tổng + Tính tổng tiền)
+    // 3. Thực hiện Query song song
     const [list, total, aggregation] = await Promise.all([
       // A. Lấy danh sách
       this.prisma.partners.findMany({
         where,
         include: {
           profiles: {
-            // Join lấy tên nhân viên phụ trách
             select: { full_name: true },
           },
+          // THÊM: Lấy đơn hàng mới nhất của khách
+          orders: {
+            orderBy: { created_at: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              code: true,
+              final_amount: true,
+              paid_amount: true,
+              created_at: true,
+            },
+          },
         },
-        orderBy: { created_at: 'desc' }, // Mới nhất lên đầu
+        orderBy: { created_at: 'desc' },
         skip,
         take: limitNum,
       }),
 
-      // B. Đếm tổng số bản ghi (Pagination)
+      // B. Đếm tổng số bản ghi
       this.prisma.partners.count({ where }),
 
-      // C. Tính tổng Nợ và Tổng Bán (Hiển thị trên Header bảng)
+      // C. Tính tổng Nợ và Tổng Bán
       this.prisma.partners.aggregate({
         where,
         _sum: {
-          current_debt: true, // Nợ hiện tại
-          total_revenue: true, // Tổng bán
+          current_debt: true,
+          total_revenue: true,
         },
       }),
     ]);
 
-    // 4. Serialize (Convert BigInt/Decimal sang String/Number)
-    const serializedList = this.serialize(list);
+    // 4. Xử lý dữ liệu trả về
+    const formattedList = list.map((customer) => {
+      // Lấy đơn hàng mới nhất (nếu có)
+      const latestOrder = customer.orders?.[0];
 
-    // Convert Decimal sang Number cho frontend dễ dùng
+      // Tính nợ của đơn hàng này
+      const orderDebt = latestOrder
+        ? Number(latestOrder.final_amount || 0) -
+          Number(latestOrder.paid_amount || 0)
+        : 0;
+
+      return {
+        ...customer,
+        // Gắn thông tin đơn hàng mới nhất và nợ ra ngoài payload
+        latest_order: latestOrder
+          ? {
+              id: latestOrder.id.toString(), // Convert BigInt sang String
+              code: latestOrder.code,
+              created_at: latestOrder.created_at,
+              final_amount: Number(latestOrder.final_amount || 0),
+              paid_amount: Number(latestOrder.paid_amount || 0),
+              debt_amount: orderDebt > 0 ? orderDebt : 0, // Nợ của riêng đơn hàng này
+            }
+          : null,
+
+        // Xóa mảng orders để JSON trả về gọn gàng hơn
+        orders: undefined,
+      };
+    });
+
+    const serializedList = this.serialize(formattedList);
+
     const totalDebt = Number(aggregation._sum.current_debt || 0);
     const totalRevenue = Number(aggregation._sum.total_revenue || 0);
-
-    // Tính "Tổng bán trừ trả hàng" (Nếu cần query thêm bảng returns, nhưng ở đây tạm lấy total_revenue)
-    const netRevenue = totalRevenue;
 
     return {
       data: serializedList,
@@ -800,9 +827,9 @@ export class PartnersService {
         totalPages: Math.ceil(total / limitNum),
       },
       summary: {
-        totalDebt, // Nợ hiện tại (Số màu đỏ trong hình)
-        totalRevenue, // Tổng bán
-        netRevenue, // Tổng bán trừ trả hàng
+        totalDebt,
+        totalRevenue,
+        netRevenue: totalRevenue,
       },
     };
   }

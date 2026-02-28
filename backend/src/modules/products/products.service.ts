@@ -767,4 +767,37 @@ export class ProductsService {
       };
     });
   }
+
+  // ĐỔI TÊN THƯƠNG HIỆU ĐỒNG LOẠT
+  async updateBrand(oldName: string, newName: string) {
+    if (!newName || newName.trim() === '') {
+      throw new BadRequestException('Tên thương hiệu mới không được để trống');
+    }
+
+    const result = await this.prisma.products.updateMany({
+      where: { brand: oldName },
+      data: { brand: newName },
+    });
+
+    return {
+      message: `Đã đổi tên thương hiệu từ "${oldName}" thành "${newName}"`,
+      updatedCount: result.count, // Trả về số lượng sản phẩm đã được đổi tên
+    };
+  }
+
+  // XÓA THƯƠNG HIỆU (VÀ XÓA TẤT CẢ SẢN PHẨM CỦA NÓ)
+  async deleteBrand(brandName: string) {
+    // ⚠️ CHÚ Ý: Hành động này sẽ xóa THẬT các sản phẩm thuộc Brand này khỏi DB.
+    // Nếu các sản phẩm này đã từng có giao dịch bán hàng (order_items),
+    // Prisma có thể chặn xóa nếu bạn không setup Cascade Delete.
+    const result = await this.prisma.products.updateMany({
+      where: { brand: brandName },
+      data: { brand: null }, // Gỡ bỏ tên hãng, giữ lại sản phẩm
+    });
+
+    return {
+      message: `Đã xóa thương hiệu "${brandName}".`,
+      deletedCount: result.count,
+    };
+  }
 }

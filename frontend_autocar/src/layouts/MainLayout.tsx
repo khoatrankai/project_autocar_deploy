@@ -17,7 +17,8 @@ import {
   LogOut,
   User,
   KeyRound,
-  Check, // Thêm icon Check
+  Check,
+  FileOutput, // Thêm icon Check
 } from "lucide-react";
 import { ThemeSwitcher } from "../components/shared/ThemeSwitcher";
 import { useAuthStore } from "../store/useAuthStore";
@@ -332,12 +333,18 @@ export default function MainLayout() {
             <Link to="/online" className={getNavLinkClass("/online")}>
               <Globe size={18} /> Bán Online
             </Link>
+            <Link
+              to="/stock-exports"
+              className={getNavLinkClass("/stock-exports")}
+            >
+              <FileOutput size={18} /> Phiếu xuất kho
+            </Link>
           </div>
 
           <div className="flex items-center gap-2 pr-2">
-            <button className="hidden md:flex items-center gap-2 bg-background text-primary px-4 py-1.5 rounded font-bold hover:bg-secondary transition-colors shadow-sm whitespace-nowrap">
+            {/* <button className="hidden md:flex items-center gap-2 bg-background text-primary px-4 py-1.5 rounded font-bold hover:bg-secondary transition-colors shadow-sm whitespace-nowrap">
               <ShoppingCart size={18} /> Bán hàng
-            </button>
+            </button> */}
             <button className="md:hidden text-primary-foreground p-2">
               <Menu size={24} />
             </button>

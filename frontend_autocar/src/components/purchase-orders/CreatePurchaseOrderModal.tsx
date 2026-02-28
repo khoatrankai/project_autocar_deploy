@@ -314,6 +314,12 @@ export default function CreatePurchaseOrderModal({
 
   const handleSubmit = async (status: "draft" | "completed") => {
     if (!formData.supplier_id) return toast.error("Vui lòng chọn Nhà cung cấp");
+    if (!formData.warehouse_id) {
+      return toast.error("Vui lòng chọn Kho nhập để hoàn thành phiếu");
+    }
+    if (items.length === 0) {
+      return toast.error("Vui lòng thêm ít nhất 1 sản phẩm vào phiếu");
+    }
     setIsLoading(true);
     try {
       const payload = {
@@ -543,17 +549,24 @@ export default function CreatePurchaseOrderModal({
                       </div>
                       <div className="col-span-2 text-right">
                         <input
-                          type="number"
-                          min="0"
+                          type="text" // Đổi từ "number" sang "text"
                           className="w-full text-right border-b border-gray-300 focus:border-blue-500 outline-none bg-transparent py-1"
-                          value={item.import_price}
-                          onChange={(e) =>
+                          placeholder="0"
+                          // Format hiển thị số có dấu chấm (2.000.000)
+                          value={
+                            item.import_price
+                              ? item.import_price.toLocaleString("vi-VN")
+                              : ""
+                          }
+                          onChange={(e) => {
+                            // Loại bỏ tất cả ký tự không phải là số (như dấu chấm, chữ cái)
+                            const rawValue = e.target.value.replace(/\D/g, "");
                             handleUpdateItem(
                               idx,
                               "import_price",
-                              Number(e.target.value),
-                            )
-                          }
+                              Number(rawValue),
+                            );
+                          }}
                         />
                       </div>
                       <div className="col-span-2 flex justify-between items-center pl-4">
@@ -692,15 +705,21 @@ export default function CreatePurchaseOrderModal({
                   <span className="text-gray-600">Giảm giá</span>
                   <div className="flex items-center w-32 border-b border-gray-200 focus-within:border-blue-500">
                     <input
-                      type="number"
+                      type="text"
                       className="w-full text-right outline-none bg-transparent py-1 pr-1"
-                      value={formData.discount}
-                      onChange={(e) =>
+                      placeholder="0"
+                      value={
+                        formData.discount
+                          ? formData.discount.toLocaleString("vi-VN")
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const rawValue = e.target.value.replace(/\D/g, "");
                         setFormData({
                           ...formData,
-                          discount: Number(e.target.value),
-                        })
-                      }
+                          discount: Number(rawValue),
+                        });
+                      }}
                     />
                   </div>
                 </div>
@@ -714,15 +733,21 @@ export default function CreatePurchaseOrderModal({
                   <span className="text-gray-600">Tiền trả NCC</span>
                   <div className="flex items-center w-32 border-b border-blue-500 focus-within:border-blue-700">
                     <input
-                      type="number"
+                      type="text"
                       className="w-full text-right outline-none bg-transparent py-1 pr-1 font-medium text-gray-800"
-                      value={formData.paid_amount}
-                      onChange={(e) =>
+                      placeholder="0"
+                      value={
+                        formData.paid_amount
+                          ? formData.paid_amount.toLocaleString("vi-VN")
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const rawValue = e.target.value.replace(/\D/g, "");
                         setFormData({
                           ...formData,
-                          paid_amount: Number(e.target.value),
-                        })
-                      }
+                          paid_amount: Number(rawValue),
+                        });
+                      }}
                     />
                   </div>
                 </div>

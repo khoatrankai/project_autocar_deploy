@@ -35,6 +35,11 @@ import { transactionService } from "../services/transactionService";
 import { dashboardService } from "../services/dashboardService";
 import { customerService } from "../services/customerService";
 import { usePurchaseOrderStore } from "../store/usePurchaseOrderStore";
+import {
+  exportDebtExcel,
+  exportGrabFeeExcel,
+  exportSaleProfitExcel,
+} from "../utils/exportDashboardExcel";
 
 // --- HELPER FORMAT ---
 const formatMoney = (amount: number | string | undefined | null) => {
@@ -286,14 +291,54 @@ export default function DashboardPage() {
     }
   };
 
-  const handleExportExcel = (type: string) => {
-    toast.success(`Đang tạo file Excel: ${type}...`);
-  };
-
   useEffect(() => {
     fetchFilterPurchase();
   }, []);
 
+  const handleExportExcel = async (type: string) => {
+    try {
+      if (type === "Bao_Cao_Cong_No") {
+        toast.loading("Đang xuất file Công nợ...");
+        const dataToExport = showOverdueOnly ? overdueDebts : debtCustomers;
+        if (dataToExport.length === 0) {
+          toast.dismiss();
+          return toast.error("Không có dữ liệu để xuất");
+        }
+        await exportDebtExcel(dataToExport, showOverdueOnly);
+        toast.dismiss();
+        toast.success("Xuất file thành công!");
+      } else if (type === "Loi_Nhuan_Sale") {
+        if (!payrollData) return toast.error("Chưa có dữ liệu lương");
+        toast.loading("Đang xuất file Lợi nhuận...");
+
+        // Lấy tên nhân viên đang chọn
+        const staffName =
+          filterPurchase.staffs?.find(
+            (s: any) => s.id === payrollFilter.staffId,
+          )?.full_name || "NhanVien";
+
+        await exportSaleProfitExcel(payrollData, staffName);
+        toast.dismiss();
+        toast.success("Xuất file thành công!");
+      } else if (type === "Phi_Grab_Cong_Ty") {
+        if (!payrollData) return toast.error("Chưa có dữ liệu Grab");
+        toast.loading("Đang xuất file Phí Grab...");
+
+        const staffName =
+          filterPurchase.staffs?.find(
+            (s: any) => s.id === payrollFilter.staffId,
+          )?.full_name || "NhanVien";
+
+        await exportGrabFeeExcel(payrollData, staffName);
+        toast.dismiss();
+        toast.success("Xuất file thành công!");
+      }
+    } catch (error) {
+      toast.dismiss();
+      toast.error("Lỗi khi xuất Excel");
+      console.error(error);
+    }
+  };
   // ==========================================
   // 4. RENDER
   // ==========================================

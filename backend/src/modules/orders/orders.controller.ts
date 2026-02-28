@@ -65,8 +65,11 @@ export class OrdersController {
 
   @Get()
   @ApiOperation({ summary: 'Lấy danh sách đơn hàng' })
-  findAll() {
-    return this.ordersService.findAll();
+  findAll(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.ordersService.findAll({ startDate, endDate });
   }
 
   @Get('daily-sales')

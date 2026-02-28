@@ -6,6 +6,8 @@ import {
   Param,
   ParseIntPipe,
   UseGuards,
+  Delete,
+  Patch,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
@@ -36,5 +38,31 @@ export class CategoriesController {
   @Get()
   findAll() {
     return this.service.findAll();
+  }
+
+  // ==========================================
+  // 4. CẬP NHẬT DANH MỤC
+  // ==========================================
+  @Patch(':id')
+  async update(
+    @Param('id') id: string,
+    @Body() updateCategoryDto: any, // Thay 'any' bằng 'UpdateCategoryDto' nếu có
+  ) {
+    const result = await this.service.update(id, updateCategoryDto);
+    return {
+      success: true,
+      message: 'Cập nhật danh mục thành công',
+    };
+  }
+  // ==========================================
+  // 5. XÓA DANH MỤC
+  // ==========================================
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    const result = await this.service.remove(id);
+    return {
+      success: true,
+      message: 'Đã xóa danh mục an toàn',
+    };
   }
 }

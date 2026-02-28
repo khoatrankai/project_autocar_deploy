@@ -10,14 +10,17 @@ import { Type } from 'class-transformer';
 
 class PurchaseItemDto {
   @ApiProperty()
+  @Type(() => Number)
   @IsNumber()
   product_id: number;
 
   @ApiProperty()
+  @Type(() => Number)
   @IsNumber()
   quantity: number;
 
   @ApiProperty()
+  @Type(() => Number)
   @IsNumber()
   import_price: number;
 }
