@@ -7,8 +7,6 @@ import {
   Package,
   ShoppingCart,
   Users,
-  BarChart3,
-  Globe,
   Bell,
   Settings,
   ChevronDown,
@@ -31,21 +29,21 @@ const PRODUCT_MENU = [
     title: "Hàng hóa",
     items: [
       { label: "Danh sách hàng hóa", path: "/products" },
-      { label: "Thiết lập giá", path: "/products/price-setting" },
+      // { label: "Thiết lập giá", path: "/products/price-setting" },
     ],
   },
   {
     title: "Kho hàng",
     items: [
       { label: "Chuyển hàng", path: "/products/transfer" },
-      { label: "Kiểm kho", path: "/products/inventory-check" },
-      { label: "Xuất hủy", path: "/products/dispose" },
+      // { label: "Kiểm kho", path: "/products/inventory-check" },
+      // { label: "Xuất hủy", path: "/products/dispose" },
     ],
   },
   {
     title: "Nhập hàng",
     items: [
-      { label: "Hóa đơn đầu vào", path: "/products/invoices" },
+      // { label: "Hóa đơn đầu vào", path: "/products/invoices" },
       { label: "Nhà cung cấp", path: "/suppliers" },
       { label: "Nhập hàng", path: "/products/import" },
       { label: "Trả hàng nhập", path: "/products/return" },
@@ -287,7 +285,6 @@ export default function MainLayout() {
             <Link to="/" className={getNavLinkClass("/")}>
               <LayoutDashboard size={18} /> Tổng quan
             </Link>
-
             <div className="group h-full relative flex items-center">
               <Link to="/products" className={getNavLinkClass("/products")}>
                 <Package size={18} /> Hàng hóa{" "}
@@ -320,19 +317,20 @@ export default function MainLayout() {
                 </div>
               </div>
             </div>
-
             <Link to="/orders" className={getNavLinkClass("/orders")}>
               <ShoppingCart size={18} /> Đơn hàng
             </Link>
             <Link to="/customers" className={getNavLinkClass("/customers")}>
               <Users size={18} /> Khách hàng
             </Link>
-            <Link to="/reports" className={getNavLinkClass("/reports")}>
+
+            {/* <Link to="/reports" className={getNavLinkClass("/reports")}>
               <BarChart3 size={18} /> Phân tích
             </Link>
             <Link to="/online" className={getNavLinkClass("/online")}>
               <Globe size={18} /> Bán Online
-            </Link>
+            </Link> */}
+
             <Link
               to="/stock-exports"
               className={getNavLinkClass("/stock-exports")}
