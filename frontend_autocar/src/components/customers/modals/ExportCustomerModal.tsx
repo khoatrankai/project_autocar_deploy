@@ -56,7 +56,7 @@ export default function ExportCustomerModal({ isOpen, onClose }: Props) {
     setIsLoading(true);
     try {
       // Gọi API export từ customerService
-      const blob = await customerService.exportData(selectedCols);
+      const blob = await customerService.exportCustomers();
 
       // Tạo link tải xuống
       const url = window.URL.createObjectURL(new Blob([blob]));

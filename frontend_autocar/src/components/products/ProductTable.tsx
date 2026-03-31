@@ -13,6 +13,7 @@ import {
   Trash2,
   Loader2,
   Upload, // Thêm icon Upload
+  DatabaseBackup,
 } from "lucide-react";
 import ExportProductModal from "./modals/ExportProductModal"; // Import Modal mới
 import { useState, useRef, useEffect } from "react";
@@ -93,7 +94,7 @@ export default function ProductTable() {
     return () => clearTimeout(timer);
   }, [localSearch, filters.search, setFilters]);
 
-  // --- IMPORT LOGIC (MỚI) ---
+  // --- IMPORT LOGIC (2 BƯỚC) ---
   const handleImportClick = () => {
     // Kích hoạt click vào input file ẩn
     if (fileInputRef.current) {
@@ -101,38 +102,94 @@ export default function ProductTable() {
     }
   };
 
+  // Hàm phụ: Xử lý bước 2 (Gọi API lưu vào DB)
+  const executeConfirmImport = async (pendingListData: any[]) => {
+    const toastId = toast.loading("Đang lưu dữ liệu vào hệ thống...");
+    try {
+      const result = await productService.confirmImport(pendingListData);
+      toast.success(
+        `Nhập thành công ${result.success} sản phẩm! ${
+          result.failed > 0 ? `(Lỗi: ${result.failed})` : ""
+        }`,
+      );
+      fetchProducts(); // Reload bảng
+    } catch (error: any) {
+      toast.error(
+        error.response?.data?.message || "Có lỗi xảy ra khi lưu dữ liệu.",
+      );
+    } finally {
+      toast.dismiss(toastId);
+    }
+  };
+
+  // Hàm chính: Xử lý bước 1 (Đọc file & Validate)
   const handleFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate đuôi file (Optional)
+    // Validate đuôi file
     if (!file.name.match(/\.(xlsx|xls)$/)) {
       toast.error("Vui lòng chọn file Excel (.xlsx, .xls)");
       return;
     }
 
     setIsImporting(true);
-    // Dùng toast.promise để hiện loading đẹp hơn
-    const importPromise = productService.importProducts(file);
+    const toastId = toast.loading("Đang kiểm tra dữ liệu file...");
 
-    toast
-      .promise(importPromise, {
-        loading: "Đang nhập dữ liệu...",
-        success: (data) => {
-          fetchProducts(); // Reload bảng sau khi import
-          return `Nhập thành công! ${data.message || ""}`;
-        },
-        error: (err) => {
-          return err.response?.data?.message || "Lỗi khi nhập file";
-        },
-      })
-      .finally(() => {
-        setIsImporting(false);
-        // Reset input để có thể chọn lại cùng 1 file nếu cần
-        if (event.target) event.target.value = "";
-      });
+    try {
+      // 1. Gọi API Kiểm tra
+      const apiResponse = await productService.checkImportFile(file);
+      toast.dismiss(toastId);
+
+      // Dựa vào chuẩn response của Backend: dữ liệu thực sự nằm ở apiResponse.data
+      const payload = apiResponse.data;
+
+      // Check an toàn
+      if (!payload || !payload.pendingList) {
+        toast.error("Lỗi: Cấu trúc dữ liệu trả về từ server không hợp lệ.");
+        return;
+      }
+
+      // 2. Nếu Backend phát hiện trùng mã SKU trong DB -> Hỏi ý kiến ghi đè
+      if (payload.requiresConfirmation) {
+        const duplicateCount = payload.pendingList.filter(
+          (p: any) => p.isExistInDb,
+        ).length;
+
+        const userConfirm = window.confirm(
+          `${payload.message}\n\nChi tiết: Có ${duplicateCount} sản phẩm bị trùng mã SKU trên hệ thống.\nNhấn OK để GHI ĐÈ thông tin mới lên sản phẩm cũ.`,
+        );
+
+        if (userConfirm) {
+          await executeConfirmImport(payload.pendingList);
+        } else {
+          toast("Đã hủy nhập dữ liệu.", { icon: "ℹ️" });
+        }
+      } else {
+        // 3. Nếu dữ liệu sạch 100% -> Vẫn hiện thông báo hỏi có muốn nhập không
+        const userConfirm = window.confirm(
+          `Kiểm tra file hợp lệ!\n\nTìm thấy ${payload.total} sản phẩm mới. Bạn có muốn tiến hành lưu vào phần mềm không?`,
+        );
+
+        if (userConfirm) {
+          await executeConfirmImport(payload.pendingList);
+        } else {
+          toast("Đã hủy nhập dữ liệu.", { icon: "ℹ️" });
+        }
+      }
+    } catch (error: any) {
+      toast.dismiss(toastId);
+      // Hiển thị lỗi do Backend ném ra (VD: Trùng mã ngay trong file Excel)
+      toast.error(
+        error.response?.data?.message || "Lỗi khi kiểm tra file Excel!",
+      );
+    } finally {
+      setIsImporting(false);
+      // Reset input để chọn lại cùng 1 file nếu cần
+      if (event.target) event.target.value = "";
+    }
   };
 
   // --- SELECTION LOGIC ---
@@ -314,7 +371,14 @@ export default function ProductTable() {
               <FileDown size={16} />{" "}
               <span className="hidden sm:inline">Xuất file</span>
             </button>
-
+            <button
+              onClick={() => (window.location.href = "/history-backup")} // Sửa lại đường dẫn này nếu Route của bạn tên khác
+              className="flex items-center gap-2 px-3 py-2 bg-orange-50 text-orange-600 border border-orange-200 rounded hover:bg-orange-100 transition-colors text-sm font-medium"
+              title="Chuyển đến trang Quản lý sao lưu, khôi phục và dọn dẹp dữ liệu"
+            >
+              <DatabaseBackup size={16} />
+              <span className="hidden lg:inline">Sao lưu & Khôi phục</span>
+            </button>
             {/* Column Selector Toggle */}
             <div className="relative" ref={selectorRef}>
               <button

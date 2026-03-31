@@ -32,6 +32,8 @@ import CreateStockTransferModal from "./modals/CreateStockTransferModal";
 import { useStockTransferStore } from "../../store/useStockTransferStore";
 import StockTransferDetailPanel from "./modals/StockTransferDetailPanel";
 import StockTransferDetailModal from "./modals/StockTransferDetailModal";
+import { stockTransferService } from "../../services/stockTransferService";
+import UpdateStockTransferModal from "./modals/UpdateStockTransferModal";
 
 // --- CẤU HÌNH CỘT ---
 const COLUMN_CONFIG = [
@@ -54,6 +56,7 @@ export default function StockTransferTable() {
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [localSearch, setLocalSearch] = useState(filters.search || "");
   const [detailId, setDetailId] = useState(null);
+  const [updateId, setUpdateId] = useState<string | null>(null);
 
   // State Selection & Expand
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -135,6 +138,51 @@ export default function StockTransferTable() {
     toast("Tính năng import đang phát triển");
   };
 
+  // --- XÓA NHIỀU PHIẾU (REMOVE MANY) ---
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (
+      !window.confirm(
+        `Bạn có chắc chắn muốn xóa ${selectedIds.length} phiếu chuyển đã chọn?\nLưu ý: Chỉ các phiếu ở trạng thái "Đang chuyển" mới được hoàn lại tồn kho.`,
+      )
+    )
+      return;
+
+    try {
+      // Giả sử bạn đã thêm hàm removeMany vào stockTransferService
+      await stockTransferService.removeMany(selectedIds);
+      toast.success(`Đã xóa thành công ${selectedIds.length} phiếu.`);
+      setSelectedIds([]); // Reset selection
+      fetchTransfers(); // Reload danh sách
+    } catch (error: any) {
+      toast.error(
+        error.response?.data?.message || "Lỗi khi xóa danh sách phiếu!",
+      );
+    }
+  };
+
+  // --- XÓA 1 PHIẾU (REMOVE 1) TỪ MENU ---
+  const handleDeleteSingle = async (id: string, code: string) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn hủy phiếu ${code} không?`))
+      return;
+
+    try {
+      await stockTransferService.remove(id);
+      toast.success(`Đã hủy phiếu ${code} thành công.`);
+      fetchTransfers();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Lỗi khi hủy phiếu!");
+    }
+  };
+
+  // --- XỬ LÝ NÚT SỬA PHIẾU ---
+  const handleEditTransfer = (id: string) => {
+    // Tùy theo logic của bạn:
+    // 1. Nếu bạn có Modal sửa riêng thì bật Modal lên và truyền id.
+    // 2. Tạm thời mình sẽ mở Detail Modal (giống nút xem chi tiết) vì thường Form Sửa sẽ tích hợp chung hoặc nằm riêng.
+    setUpdateId(id);
+  };
+
   // --- MENU ACTIONS ---
   const getActionMenu = (record: any): MenuProps => ({
     items: [
@@ -145,15 +193,22 @@ export default function StockTransferTable() {
         onClick: () => handleToggleExpand(record.id),
       },
       { key: "print", label: "In phiếu", icon: <Printer size={16} /> },
+      // Chỉ hiện nút Sửa/Xóa nếu trạng thái là Đang chuyển (pending) hoặc Lưu nháp (draft)
       ...(record.status === "pending" || record.status === "draft"
         ? [
-            { key: "edit", label: "Sửa phiếu", icon: <Edit size={16} /> },
+            {
+              key: "edit",
+              label: "Sửa phiếu",
+              icon: <Edit size={16} />,
+              onClick: () => handleEditTransfer(record.id), // Gắn hàm Sửa
+            },
             { type: "divider" as const },
             {
               key: "delete",
               label: <span className="text-red-600">Hủy phiếu</span>,
               icon: <XCircle size={16} className="text-red-600" />,
               danger: true,
+              onClick: () => handleDeleteSingle(record.id, record.code), // Gắn hàm Xóa 1
             },
           ]
         : []),
@@ -219,7 +274,10 @@ export default function StockTransferTable() {
           </div>
           <div className="flex gap-2 items-center">
             {selectedIds.length > 0 && (
-              <button className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded text-sm">
+              <button
+                onClick={handleDeleteSelected} // Gắn hàm Xóa nhiều vào đây
+                className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 transition-colors text-sm font-medium"
+              >
                 <Trash2 size={16} /> <span>Xóa ({selectedIds.length})</span>
               </button>
             )}
@@ -530,6 +588,17 @@ export default function StockTransferTable() {
           onCancel={() => setDetailId(null)}
           onSuccess={() => {
             setDetailId(null);
+            fetchTransfers();
+          }}
+        />
+      )}
+      {updateId && (
+        <UpdateStockTransferModal
+          open={!!updateId}
+          transferId={updateId}
+          onCancel={() => setUpdateId(null)}
+          onSuccess={() => {
+            setUpdateId(null);
             fetchTransfers();
           }}
         />

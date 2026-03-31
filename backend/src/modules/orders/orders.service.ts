@@ -12,211 +12,253 @@ import { Prisma } from '@prisma/client';
 export class OrdersService {
   constructor(private prisma: PrismaService) {}
 
+  private async generateOrderCode(tx: any, prefix: string): Promise<string> {
+    const currentYear = new Date().getFullYear();
+    const prefixWithVer = `${prefix}00`; // Đơn mới luôn bắt đầu bằng version 00
+
+    // Tìm mã gốc lớn nhất của năm hiện tại
+    const lastOrder = await tx.orders.findFirst({
+      where: {
+        code: {
+          startsWith: prefixWithVer,
+          endsWith: currentYear.toString(),
+        },
+      },
+      orderBy: { code: 'desc' }, // Lấy mã cao nhất
+    });
+
+    let nextStt = 1;
+    if (lastOrder) {
+      // Tách STT: DH00[22]2026 -> Bỏ 'DH00' và '2026'
+      const lastCode = lastOrder.code;
+      const sttPart = lastCode
+        .replace(prefixWithVer, '')
+        .replace(currentYear.toString(), '');
+      nextStt = (parseInt(sttPart) || 0) + 1;
+    }
+
+    return `${prefixWithVer}${nextStt}${currentYear}`;
+  }
+
+  // =================================================================
+  // 1. TẠO ĐƠN HÀNG
+  // =================================================================
   async create(dto: CreateOrderDto, userId: string) {
-    const {
-      partner_id,
-      warehouse_id,
-      staff_id,
-      items,
-      paid_amount,
-      discount = 0,
-      payment_method = 'cash',
-      note,
-      code,
-    } = dto;
-
-    // Lấy nhân viên tạo đơn (ưu tiên từ DTO nếu admin tạo hộ, không thì lấy từ token)
-    const finalStaffId = staff_id || userId;
-
-    // Sử dụng Prisma Transaction (All or Nothing)
     return this.prisma.$transaction(async (tx) => {
-      // ---------------------------------------------------------
-      // 1. KIỂM TRA KHÁCH HÀNG (Partner Checks)
-      // ---------------------------------------------------------
+      // A. Check Partner
       const partner = await tx.partners.findUnique({
-        where: { id: BigInt(partner_id) },
+        where: { id: BigInt(dto.partner_id) },
       });
-
       if (!partner) throw new NotFoundException('Khách hàng không tồn tại');
       if (partner.status === 'locked')
-        throw new ForbiddenException('Khách hàng đang bị khóa giao dịch');
+        throw new ForbiddenException('Khách hàng bị khóa');
 
-      // ---------------------------------------------------------
-      // 2. XỬ LÝ HÀNG HÓA & TỒN KHO (Inventory Loop)
-      // ---------------------------------------------------------
+      // B. Xử lý Items & Tồn kho
       let totalAmount = 0;
+      const orderItemsData: Prisma.order_itemsCreateManyInput[] = [];
 
-      // Khai báo kiểu dữ liệu rõ ràng để tránh lỗi 'never'
-      const orderItemsData: Prisma.order_itemsCreateManyOrdersInput[] = [];
-
-      for (const item of items) {
+      for (const item of dto.items) {
         const lineTotal = item.quantity * item.price;
         totalAmount += lineTotal;
 
-        // A. Tìm bản ghi tồn kho
         const stock = await tx.inventory.findUnique({
           where: {
             product_id_warehouse_id: {
               product_id: BigInt(item.product_id),
-              warehouse_id: BigInt(warehouse_id),
+              warehouse_id: BigInt(dto.warehouse_id),
             },
           },
         });
 
-        // B. Check số lượng (Fix lỗi object is possibly null)
-        const currentStock = stock?.quantity ?? 0; // Nếu null thì coi là 0
-
-        if (!stock || currentStock < item.quantity) {
-          const product = await tx.products.findUnique({
-            where: { id: BigInt(item.product_id) },
-          });
+        if (!stock || (stock.quantity ?? 0) < item.quantity) {
           throw new BadRequestException(
-            `Sản phẩm "${product?.name}" không đủ hàng tại kho này. (Tồn: ${currentStock}, Yêu cầu: ${item.quantity})`,
+            `Sản phẩm ID ${item.product_id} không đủ tồn kho`,
           );
         }
 
-        // C. Trừ tồn kho
-        const newQuantity = currentStock - item.quantity;
+        // Trừ kho & Ghi Log
+        const newQty = (stock.quantity ?? 0) - item.quantity;
         await tx.inventory.update({
           where: { id: stock.id },
-          data: { quantity: newQuantity },
+          data: { quantity: newQty },
         });
-
-        // D. Ghi Log Kho (Inventory Log) - Bắt buộc để truy vết
         await tx.inventory_logs.create({
           data: {
-            warehouse_id: BigInt(warehouse_id),
+            warehouse_id: BigInt(dto.warehouse_id),
             product_id: BigInt(item.product_id),
-            change_amount: -item.quantity, // Số âm vì xuất bán
-            balance_after: newQuantity,
+            change_amount: -item.quantity,
+            balance_after: newQty,
             type: 'sale',
-            note: `Bán hàng đơn: ${code || 'Mới'}`,
+            note: `Bán hàng đơn mới`,
           },
         });
 
-        // E. Chuẩn bị data cho Order Items (Snapshot giá & tên)
-        const productInfo = await tx.products.findUnique({
+        const prod = await tx.products.findUnique({
           where: { id: BigInt(item.product_id) },
         });
-
         orderItemsData.push({
           product_id: BigInt(item.product_id),
-          product_sku: productInfo?.sku,
-          product_name: productInfo?.name,
+          product_sku: prod?.sku,
+          product_name: prod?.name,
           quantity: item.quantity,
           price: item.price,
-          discount: 0, // Logic giảm giá từng dòng (nếu cần mở rộng sau này)
+          discount: 0,
         });
       }
 
-      // ---------------------------------------------------------
-      // 3. TÍNH TOÁN TÀI CHÍNH (Financial Calculation)
-      // ---------------------------------------------------------
-      // Tổng tiền cuối cùng = Tổng hàng - Giảm giá
-      const finalAmount = Math.max(0, totalAmount - discount);
-
-      // Thay đổi công nợ = Tiền phải trả - Tiền khách đưa
-      // (+): Khách nợ thêm, (-): Khách trả dư/tiền thừa
-      const debtChange = finalAmount - paid_amount;
-
-      // ---------------------------------------------------------
-      // 4. CHECK HẠN MỨC CÔNG NỢ (Debt Limit Check)
-      // ---------------------------------------------------------
-      const currentDebt = Number(partner.current_debt || 0);
-      const debtLimit = Number(partner.debt_limit || 0);
-
-      // Dự kiến nợ mới sau khi giao dịch xong
-      const newDebtForecast = currentDebt + debtChange;
-
-      if (newDebtForecast > debtLimit) {
-        throw new BadRequestException(
-          `Vượt hạn mức nợ. Nợ hiện tại: ${currentDebt.toLocaleString()}, Đơn này nợ thêm: ${debtChange.toLocaleString()}, Hạn mức: ${debtLimit.toLocaleString()}`,
-        );
-      }
-
-      // ---------------------------------------------------------
-      // 5. TẠO ĐƠN HÀNG (Orders)
-      // ---------------------------------------------------------
-      const newOrderCode = code || `DH${Date.now()}`;
+      // C. Sinh mã và Tạo đơn
+      const finalAmount = Math.max(0, totalAmount - (dto.discount || 0));
+      const newOrderCode = await this.generateOrderCode(tx, 'DH');
 
       const newOrder = await tx.orders.create({
         data: {
           code: newOrderCode,
-          partner_id: BigInt(partner_id),
-          warehouse_id: BigInt(warehouse_id),
-          staff_id: finalStaffId,
+          partner_id: BigInt(dto.partner_id),
+          warehouse_id: BigInt(dto.warehouse_id),
+          staff_id: dto.staff_id || userId,
           total_amount: totalAmount,
-          discount: discount,
+          discount: dto.discount || 0,
           final_amount: finalAmount,
-          paid_amount: paid_amount,
-          status: 'completed',
-          note: note,
-          // Tạo luôn items trong cú pháp create của order (Clean hơn)
-          order_items: {
-            createMany: {
-              data: orderItemsData,
-            },
-          },
+          paid_amount: dto.paid_amount || 0,
+          status: 'pending',
+          note: dto.note,
+          order_items: { createMany: { data: orderItemsData } },
         },
       });
 
-      // ---------------------------------------------------------
-      // 6. CẬP NHẬT PARTNER (Partners)
-      // ---------------------------------------------------------
-      // Chỉ update nếu có phát sinh doanh số hoặc công nợ
-      if (finalAmount > 0 || debtChange !== 0) {
-        await tx.partners.update({
-          where: { id: BigInt(partner_id) },
-          data: {
-            current_debt: { increment: debtChange }, // Cộng thêm phần nợ mới (hoặc trừ đi nếu trả dư)
-            total_revenue: { increment: finalAmount }, // Cộng dồn doanh số mua hàng
-          },
-        });
-      }
-
-      // ---------------------------------------------------------
-      // 7. TẠO PHIẾU THU (Transactions)
-      // ---------------------------------------------------------
-      if (paid_amount > 0) {
-        await tx.transactions.create({
-          data: {
-            code: `PT${Date.now()}`,
-            amount: paid_amount,
-            type: 'receipt', // Thu tiền
-            payment_method: payment_method,
-            partner_id: BigInt(partner_id),
-            order_id: newOrder.id,
-            staff_id: finalStaffId,
-            note: `Thu tiền đơn hàng ${newOrderCode}`,
-            // category_id: ... (nếu có loại thu chi)
-          },
-        });
-      }
-
-      // ---------------------------------------------------------
-      // 8. LOG ADMIN (Activity Logs) - Optional
-      // ---------------------------------------------------------
-      const staffProfile = await tx.profiles.findUnique({
-        where: { id: finalStaffId },
-      });
-      console.log(staffProfile);
-      await tx.activity_logs.create({
+      // D. Cập nhật công nợ Partner
+      const debtChange = finalAmount - (dto.paid_amount || 0);
+      await tx.partners.update({
+        where: { id: BigInt(dto.partner_id) },
         data: {
-          user_id: userId,
-          user_name: staffProfile?.full_name || 'Nhân viên', // <--- THÊM DÒNG NÀY
-          action: 'CREATE_ORDER',
-          entity: 'orders',
-          entity_id: newOrder.id.toString(),
-          details: {
-            code: newOrderCode,
-            final_amount: finalAmount,
-            debt_change: debtChange,
-          },
+          current_debt: { increment: debtChange },
+          total_revenue: { increment: finalAmount },
         },
       });
 
       return newOrder;
     });
+  }
+
+  // =================================================================
+  // 2. CẬP NHẬT ĐƠN HÀNG (VERSIONING)
+  // =================================================================
+  async update(id: string, dto: Partial<CreateOrderDto>, userId: string) {
+    const orderId = BigInt(id);
+    return this.prisma.$transaction(async (tx) => {
+      const currentOrder = await tx.orders.findUnique({
+        where: { id: orderId },
+      });
+      if (!currentOrder) throw new NotFoundException('Không tìm thấy đơn hàng');
+      if (currentOrder.status === 'completed')
+        throw new BadRequestException('Đơn đã hoàn thành, không thể sửa');
+
+      // LOGIC ĐỔI MÃ: DH00222026 -> DH01222026
+      const prefix = 'DH';
+      const currentCode = currentOrder.code;
+      const verStr = currentCode.substring(prefix.length, prefix.length + 2);
+      const nextVer = (parseInt(verStr) + 1).toString().padStart(2, '0');
+      const sttAndYear = currentCode.substring(prefix.length + 2);
+      const updatedCode = `${prefix}${nextVer}${sttAndYear}`;
+
+      let totalAmount = Number(currentOrder.total_amount);
+
+      // Nếu có gửi lại danh sách hàng, xóa cũ tạo mới
+      if (dto.items && dto.items.length > 0) {
+        await tx.order_items.deleteMany({ where: { order_id: orderId } });
+        const newItems: Prisma.order_itemsCreateManyInput[] = [];
+        let newTotal = 0;
+
+        for (const item of dto.items) {
+          newTotal += item.quantity * item.price;
+          const p = await tx.products.findUnique({
+            where: { id: BigInt(item.product_id) },
+          });
+          newItems.push({
+            order_id: orderId,
+            product_id: BigInt(item.product_id),
+            product_sku: p?.sku,
+            product_name: p?.name,
+            quantity: item.quantity,
+            price: item.price,
+            discount: 0,
+          });
+        }
+        await tx.order_items.createMany({ data: newItems });
+        totalAmount = newTotal;
+      }
+
+      const finalAmount = Math.max(
+        0,
+        totalAmount - (dto.discount || Number(currentOrder.discount)),
+      );
+
+      return await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          code: updatedCode,
+          note: dto.note,
+          discount: dto.discount,
+          paid_amount: dto.paid_amount,
+          total_amount: totalAmount,
+          final_amount: finalAmount,
+          status: (dto as any).status || currentOrder.status,
+          staff_id: dto.staff_id || userId,
+        },
+      });
+    });
+  }
+
+  async remove(id: string) {
+    const orderId = BigInt(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.orders.findUnique({
+        where: { id: orderId },
+      });
+
+      if (!order) throw new NotFoundException('Đơn hàng không tồn tại');
+
+      // KHÔNG cho xóa đơn đã hoàn thành
+      if (order.status === 'completed') {
+        throw new BadRequestException(
+          'Không thể xóa đơn hàng đã hoàn thành. Vui lòng hủy đơn trước.',
+        );
+      }
+
+      // Xóa items trước sau đó xóa đơn
+      await tx.order_items.deleteMany({ where: { order_id: orderId } });
+      await tx.orders.delete({ where: { id: orderId } });
+
+      return { message: 'Xóa đơn hàng thành công' };
+    });
+  }
+
+  async removeMany(ids: string[]) {
+    const results = {
+      success: 0,
+      failed: 0,
+      details: [] as { id: string; error: string }[],
+    };
+
+    // Duyệt qua từng ID để xóa (đảm bảo tính độc lập, cái nào lỗi thì bỏ qua cái đó)
+    for (const id of ids) {
+      try {
+        await this.remove(id); // Gọi lại hàm remove đơn lẻ đã có logic check status
+        results.success++;
+      } catch (error: any) {
+        results.failed++;
+        results.details.push({
+          id,
+          error: error.message || 'Lỗi không xác định',
+        });
+      }
+    }
+
+    return {
+      message: `Xóa hoàn tất: Thành công ${results.success}, Thất bại ${results.failed}`,
+      ...results,
+    };
   }
 
   async findAll(query: { startDate?: string; endDate?: string } = {}) {

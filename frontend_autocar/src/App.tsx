@@ -15,6 +15,7 @@ import CustomerList from "./pages/CustomerList";
 import PosPage from "./pages/PosPage";
 import DashboardPage from "./pages/DashboardPage";
 import StockExportPage from "./pages/StockExports";
+import SystemBackupPage from "./pages/SystemBackupPage";
 
 function App() {
   return (
@@ -37,14 +38,14 @@ function App() {
             <Route path="transfer" element={<StockTransferPage />} />{" "}
             {/* URL: /products/transfer */}
             <Route path="import" element={<PurchaseOrderList />} />{" "}
-            <Route path="return" element={<ReturnPage />} />
             {/* URL: /products/import */}
             {/* Thêm các route khác vào đây: price-setting, dispose... */}
           </Route>
-
+          <Route path="return" element={<ReturnPage />} />
           <Route path="suppliers" element={<SupplierList />} />
           <Route path="customers" element={<CustomerList />} />
-          <Route path="orders" element={<PosPage />} />
+          <Route path="pos" element={<PosPage />} />
+          <Route path="history-backup" element={<SystemBackupPage />} />
           <Route path="stock-exports" element={<StockExportPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
         </Route>

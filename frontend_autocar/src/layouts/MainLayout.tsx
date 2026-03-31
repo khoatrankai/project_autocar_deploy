@@ -16,7 +16,7 @@ import {
   User,
   KeyRound,
   Check,
-  FileOutput, // Thêm icon Check
+  // FileOutput, // Thêm icon Check
 } from "lucide-react";
 import { ThemeSwitcher } from "../components/shared/ThemeSwitcher";
 import { useAuthStore } from "../store/useAuthStore";
@@ -46,7 +46,18 @@ const PRODUCT_MENU = [
       // { label: "Hóa đơn đầu vào", path: "/products/invoices" },
       { label: "Nhà cung cấp", path: "/suppliers" },
       { label: "Nhập hàng", path: "/products/import" },
-      { label: "Trả hàng nhập", path: "/products/return" },
+      // { label: "Trả hàng nhập", path: "/products/return" },
+    ],
+  },
+];
+
+const ORDER_MENU = [
+  {
+    title: "Đơn hàng",
+    items: [
+      { label: "Phiếu xuất kho", path: "/stock-exports" },
+      { label: "Phiếu trả hàng", path: "/return" },
+      // { label: "Thiết lập giá", path: "/products/price-setting" },
     ],
   },
 ];
@@ -317,9 +328,44 @@ export default function MainLayout() {
                 </div>
               </div>
             </div>
-            <Link to="/orders" className={getNavLinkClass("/orders")}>
+            <div className="group h-full relative flex items-center">
+              <Link
+                to="/stock-exports"
+                className={getNavLinkClass("/stock-exports")}
+              >
+                <ShoppingCart size={18} /> Đơn hàng{" "}
+                <ChevronDown
+                  size={14}
+                  className="mt-0.5 ml-1 transition-transform group-hover:rotate-180"
+                />
+              </Link>
+              <div className="hidden group-hover:block absolute top-full left-0 w-[200px] bg-card text-card-foreground shadow-2xl rounded-b-md border border-border/20 p-6 animate-in fade-in slide-in-from-top-1 duration-200 z-[60]">
+                <div className="absolute -top-1.5 left-12 w-4 h-4 bg-card rotate-45 border-l border-t border-border/20"></div>
+                <div className="grid grid-cols-1 gap-8">
+                  {ORDER_MENU.map((section, index) => (
+                    <div key={index} className="flex flex-col gap-3">
+                      <h4 className="font-bold text-sm text-foreground uppercase border-b border-border/40 pb-2">
+                        {section.title}
+                      </h4>
+                      <div className="flex flex-col gap-2">
+                        {section.items.map((item, idx) => (
+                          <Link
+                            key={idx}
+                            to={item.path}
+                            className="text-sm text-muted-foreground hover:text-primary hover:translate-x-1 transition-all flex items-center gap-2"
+                          >
+                            <span>{item.label}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* <Link to="/orders" className={getNavLinkClass("/orders")}>
               <ShoppingCart size={18} /> Đơn hàng
-            </Link>
+            </Link> */}
             <Link to="/customers" className={getNavLinkClass("/customers")}>
               <Users size={18} /> Khách hàng
             </Link>
@@ -331,18 +377,23 @@ export default function MainLayout() {
               <Globe size={18} /> Bán Online
             </Link> */}
 
-            <Link
+            {/* <Link
               to="/stock-exports"
               className={getNavLinkClass("/stock-exports")}
             >
               <FileOutput size={18} /> Phiếu xuất kho
-            </Link>
+            </Link> */}
           </div>
 
           <div className="flex items-center gap-2 pr-2">
-            {/* <button className="hidden md:flex items-center gap-2 bg-background text-primary px-4 py-1.5 rounded font-bold hover:bg-secondary transition-colors shadow-sm whitespace-nowrap">
+            <button
+              className="hidden md:flex items-center gap-2 bg-background text-primary px-4 py-1.5 rounded font-bold hover:bg-secondary transition-colors shadow-sm whitespace-nowrap"
+              onClick={() => {
+                window.location.href = "/pos";
+              }}
+            >
               <ShoppingCart size={18} /> Bán hàng
-            </button> */}
+            </button>
             <button className="md:hidden text-primary-foreground p-2">
               <Menu size={24} />
             </button>

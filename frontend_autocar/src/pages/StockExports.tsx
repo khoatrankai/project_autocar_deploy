@@ -14,14 +14,21 @@ import {
   Loader2,
   Calendar,
   Filter,
-  ChevronDown, // <-- Thêm icon này
+  ChevronDown,
+  Trash2, // Thêm icon xóa
+  Edit, // Thêm icon sửa
+  MoreHorizontal,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "react-hot-toast";
+import { Dropdown } from "antd"; // Dùng Dropdown của Antd cho menu thao tác
+import type { MenuProps } from "antd";
+
 import { orderService } from "../services/orderService";
 import exportOrdersToExcel from "../utils/exportOrdersExcel";
+import UpdateOrderModal from "../components/stock-export/UpdateOrderModal";
+import OrderDetailModal from "../components/stock-export/OrderDetailModal";
 
-// Định nghĩa nhãn hiển thị cho bộ lọc
 const timeFilterLabels: Record<string, string> = {
   today: "Hôm nay",
   week: "Tuần này",
@@ -34,9 +41,14 @@ export default function StockExportPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [updateOrderId, setUpdateOrderId] = useState<string | null>(null);
+  const [viewOrderId, setViewOrderId] = useState<string | null>(null);
+  // --- STATES SELECTION & DELETION ---
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // --- STATES QUẢN LÝ BỘ LỌC THỜI GIAN ---
-  const [timeFilter, setTimeFilter] = useState<string>("all"); // Mặc định lấy tất cả
+  const [timeFilter, setTimeFilter] = useState<string>("all");
   const [showTimeDropdown, setShowTimeDropdown] = useState(false);
   const [dateRange, setDateRange] = useState<{
     startDate?: string;
@@ -45,7 +57,7 @@ export default function StockExportPage() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Click ra ngoài để đóng dropdown
+  // Click outside dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -59,32 +71,30 @@ export default function StockExportPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleExportExcel = async () => {
-    await exportOrdersToExcel(filteredOrders);
-  };
-
-  // Gọi API lấy danh sách kèm tham số startDate, endDate
+  // --- HANDLERS LẤY DỮ LIỆU ---
   const fetchOrders = async (
     params: { startDate?: string; endDate?: string } = {},
   ) => {
     setIsLoading(true);
     try {
-      // Truyền params vào hàm getAll của service
       const res = await orderService.getAll(params);
       setOrders(res.data);
-      setIsLoading(false);
     } catch (error) {
-      toast.error("Lỗi khi tải danh sách phiếu xuất");
+      toast.error("Lỗi khi tải danh sách đơn bán hàng");
+    } finally {
       setIsLoading(false);
     }
   };
 
-  // Gọi lần đầu khi load trang
   useEffect(() => {
     fetchOrders(dateRange);
   }, []);
 
-  // Xử lý khi chọn các mốc thời gian trong Dropdown
+  useEffect(() => {
+    setSelectedIds([]); // Reset selection khi data đổi
+  }, [orders]);
+
+  // --- LỌC THỜI GIAN ---
   const handleSelectTimeFilter = (type: string) => {
     setTimeFilter(type);
     setShowTimeDropdown(false);
@@ -115,22 +125,17 @@ export default function StockExportPage() {
         endDate = formatDate(lastDayOfWeek);
         break;
       case "month":
-        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastDayOfMonth = new Date(
-          now.getFullYear(),
-          now.getMonth() + 1,
-          0,
+        startDate = formatDate(new Date(now.getFullYear(), now.getMonth(), 1));
+        endDate = formatDate(
+          new Date(now.getFullYear(), now.getMonth() + 1, 0),
         );
-        startDate = formatDate(firstDayOfMonth);
-        endDate = formatDate(lastDayOfMonth);
         break;
       case "year":
-        const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
-        const lastDayOfYear = new Date(now.getFullYear(), 11, 31);
-        startDate = formatDate(firstDayOfYear);
-        endDate = formatDate(lastDayOfYear);
+        startDate = formatDate(new Date(now.getFullYear(), 0, 1));
+        endDate = formatDate(new Date(now.getFullYear(), 11, 31));
         break;
       case "all":
+      default:
         startDate = "";
         endDate = "";
         break;
@@ -138,12 +143,123 @@ export default function StockExportPage() {
 
     const newRange = { startDate, endDate };
     setDateRange(newRange);
-
-    // Gọi lại API với khoảng thời gian mới
     fetchOrders(newRange);
   };
 
-  // Lọc dữ liệu local theo từ khóa tìm kiếm (Search Bar)
+  // --- SELECTION HANDLERS ---
+  const isAllSelected =
+    orders.length > 0 && orders.every((o) => selectedIds.includes(o.id));
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      const newSelected = selectedIds.filter(
+        (id) => !orders.find((o) => o.id === id),
+      );
+      setSelectedIds(newSelected);
+    } else {
+      const newIds = orders.map((o) => o.id);
+      setSelectedIds(Array.from(new Set([...selectedIds, ...newIds])));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter((item) => item !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
+  // --- DELETE HANDLERS ---
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+
+    // Lọc ra các ID hợp lệ (những đơn chưa hoàn thành)
+    const validIdsToDelete = selectedIds.filter((id) => {
+      const order = orders.find((o) => o.id === id);
+      return order && order.status !== "completed";
+    });
+
+    if (validIdsToDelete.length < selectedIds.length) {
+      toast("Đã loại bỏ các đơn hàng đã hoàn thành khỏi danh sách xóa.", {
+        icon: "ℹ️",
+      });
+    }
+
+    if (validIdsToDelete.length === 0) {
+      toast.error("Không có đơn hàng nào hợp lệ để xóa!");
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Bạn có chắc muốn xóa ${validIdsToDelete.length} đơn hàng đã chọn?`,
+      )
+    )
+      return;
+
+    setIsDeleting(true);
+    try {
+      // SỬ DỤNG API MỚI DELETE-MANY Ở ĐÂY
+      await orderService.removeMany(validIdsToDelete);
+
+      toast.success(`Đã xóa ${validIdsToDelete.length} đơn hàng.`);
+      setSelectedIds([]); // Reset lại các ô checkbox
+      fetchOrders(dateRange); // Load lại bảng
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Lỗi khi xóa dữ liệu");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteSingle = async (id: string, code: string) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa đơn hàng ${code}?`)) return;
+    try {
+      await orderService.remove(id);
+      toast.success(`Xóa đơn hàng ${code} thành công!`);
+      fetchOrders(dateRange);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Lỗi khi xóa đơn hàng");
+    }
+  };
+
+  // --- ACTION MENU ---
+  const getActionMenu = (order: any): MenuProps => ({
+    items: [
+      {
+        key: "view",
+        label: "Xem chi tiết",
+        icon: <Eye size={16} />,
+        onClick: () => setViewOrderId(order.id),
+      },
+      { key: "print", label: "In phiếu", icon: <Printer size={16} /> },
+      ...(order.status !== "completed"
+        ? [
+            {
+              key: "edit",
+              label: "Sửa đơn hàng",
+              icon: <Edit size={16} />,
+              onClick: () => setUpdateOrderId(order.id), // Gắn id để mở Modal
+            },
+            { type: "divider" as const },
+            {
+              key: "delete",
+              label: <span className="text-red-600">Xóa đơn hàng</span>,
+              icon: <Trash2 size={16} className="text-red-600" />,
+              danger: true,
+              onClick: () => handleDeleteSingle(order.id, order.code),
+            },
+          ]
+        : []), // Ẩn Sửa/Xóa nếu đã hoàn thành
+    ],
+  });
+
+  const handleExportExcel = async () => {
+    await exportOrdersToExcel(filteredOrders);
+  };
+
+  // --- FILTER LOCAL ---
   const filteredOrders = orders.filter((order) => {
     const term = searchTerm.toLowerCase();
     return (
@@ -169,7 +285,23 @@ export default function StockExportPage() {
             Quản lý các đơn hàng đã bán và xuất kho
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {/* NÚT XÓA XUẤT HIỆN KHI CHỌN */}
+          {selectedIds.length > 0 && (
+            <button
+              onClick={handleDeleteSelected}
+              disabled={isDeleting}
+              className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100 transition-colors text-sm font-medium animate-in fade-in"
+            >
+              {isDeleting ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Trash2 size={16} />
+              )}
+              <span>Xóa ({selectedIds.length})</span>
+            </button>
+          )}
+
           <button
             onClick={handleExportExcel}
             className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded flex items-center gap-2 hover:bg-gray-50 text-sm font-medium transition-colors"
@@ -177,7 +309,7 @@ export default function StockExportPage() {
             <Download size={16} /> Xuất Excel
           </button>
           <button
-            onClick={() => (window.location.href = "/orders")}
+            onClick={() => (window.location.href = "/pos")}
             className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-blue-700 text-sm font-bold transition-colors shadow-sm"
           >
             Tạo đơn mới (POS)
@@ -249,7 +381,14 @@ export default function StockExportPage() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-[#f8fbff] text-gray-600 sticky top-0 z-10 text-xs font-bold uppercase border-b border-gray-200 shadow-sm">
               <tr>
-                <th className="p-3 w-12 text-center">STT</th>
+                <th className="p-3 w-12 text-center">
+                  <input
+                    type="checkbox"
+                    className="accent-blue-600 w-4 h-4 cursor-pointer"
+                    checked={isAllSelected}
+                    onChange={handleSelectAll}
+                  />
+                </th>
                 <th className="p-3 whitespace-nowrap">Mã phiếu</th>
                 <th className="p-3 whitespace-nowrap">Thời gian</th>
                 <th className="p-3 min-w-[150px]">Khách hàng</th>
@@ -257,7 +396,7 @@ export default function StockExportPage() {
                 <th className="p-3">Người bán</th>
                 <th className="p-3 text-right">Tổng tiền</th>
                 <th className="p-3 text-center">Trạng thái</th>
-                <th className="p-3 w-20 text-center">Thao tác</th>
+                <th className="p-3 w-16 text-center"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-sm">
@@ -279,19 +418,27 @@ export default function StockExportPage() {
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((order, index) => {
+                filteredOrders.map((order) => {
                   const isDebt =
                     Number(order.final_amount) > Number(order.paid_amount);
 
                   return (
                     <tr
                       key={order.id}
-                      className="hover:bg-blue-50/50 transition-colors group"
+                      className={`hover:bg-blue-50/50 transition-colors group ${selectedIds.includes(order.id) ? "bg-blue-50" : ""}`}
                     >
-                      <td className="p-3 text-center text-gray-500">
-                        {index + 1}
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="accent-blue-600 w-4 h-4 cursor-pointer"
+                          checked={selectedIds.includes(order.id)}
+                          onChange={() => handleSelectOne(order.id)}
+                        />
                       </td>
-                      <td className="p-3 font-medium text-blue-600 cursor-pointer hover:underline">
+                      <td
+                        className="p-3 font-medium text-blue-600 cursor-pointer hover:underline"
+                        onClick={() => setViewOrderId(order.id)}
+                      >
                         {order.code}
                       </td>
                       <td className="p-3 text-gray-600">
@@ -337,20 +484,15 @@ export default function StockExportPage() {
                         </span>
                       </td>
                       <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-2 opacity-60 group-hover:opacity-100 transition-opacity">
-                          <button
-                            className="text-blue-600 hover:bg-blue-100 p-1.5 rounded transition-colors"
-                            title="Xem chi tiết"
-                          >
-                            <Eye size={16} />
+                        <Dropdown
+                          menu={getActionMenu(order)}
+                          trigger={["click"]}
+                          placement="bottomRight"
+                        >
+                          <button className="p-1.5 hover:bg-gray-200 rounded-full text-gray-500 transition-colors">
+                            <MoreHorizontal size={18} />
                           </button>
-                          <button
-                            className="text-gray-600 hover:bg-gray-200 p-1.5 rounded transition-colors"
-                            title="In phiếu"
-                          >
-                            <Printer size={16} />
-                          </button>
-                        </div>
+                        </Dropdown>
                       </td>
                     </tr>
                   );
@@ -360,6 +502,24 @@ export default function StockExportPage() {
           </table>
         </div>
       </div>
+      {updateOrderId && (
+        <UpdateOrderModal
+          isOpen={!!updateOrderId}
+          orderId={updateOrderId}
+          onClose={() => setUpdateOrderId(null)}
+          onSuccess={() => {
+            setUpdateOrderId(null);
+            fetchOrders(dateRange); // Reload lại bảng sau khi sửa
+          }}
+        />
+      )}
+      {viewOrderId && (
+        <OrderDetailModal
+          isOpen={!!viewOrderId}
+          orderId={viewOrderId}
+          onClose={() => setViewOrderId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -283,8 +283,8 @@ export default function CreateReturnModal({
 
   // --- SUBMIT ---
   const handleSubmit = async (status: "draft" | "completed") => {
-    if (!formData.partner_id) return toast.error("Vui lòng chọn Nhà cung cấp");
-    if (!formData.warehouse_id) return toast.error("Vui lòng chọn Kho xuất");
+    if (!formData.partner_id) return toast.error("Vui lòng chọn Khách hàng");
+    if (!formData.warehouse_id) return toast.error("Vui lòng chọn Kho nhập");
 
     setIsLoading(true);
     try {
@@ -569,7 +569,7 @@ export default function CreateReturnModal({
               {/* Supplier (Partner) */}
               <div className="relative group">
                 <label className="text-xs font-semibold text-gray-500 mb-1 block">
-                  Nhà cung cấp (Nhận hàng trả)
+                  Khách trả hàng
                 </label>
                 <select
                   className="w-full border border-gray-300 rounded px-3 py-2.5 text-sm outline-none bg-white focus:border-blue-500"
@@ -579,7 +579,7 @@ export default function CreateReturnModal({
                   }
                 >
                   <option value="">Chọn nhà cung cấp</option>
-                  {productOptions?.suppliers?.map((sup) => (
+                  {productOptions?.customers?.map((sup) => (
                     <option key={sup.id} value={sup.id}>
                       {sup.name}
                     </option>
@@ -600,7 +600,7 @@ export default function CreateReturnModal({
                 </div>
 
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">Kho xuất</span>
+                  <span className="text-gray-600">Kho nhập</span>
                   <select
                     className="w-40 text-right border-b border-gray-200 outline-none focus:border-blue-500 bg-transparent py-1 cursor-pointer"
                     value={formData.warehouse_id}
@@ -618,7 +618,7 @@ export default function CreateReturnModal({
                 </div>
 
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">Người trả</span>
+                  <span className="text-gray-600">Người nhận</span>
                   <select
                     className="w-40 text-right border-b border-gray-200 outline-none focus:border-blue-500 bg-transparent py-1 cursor-pointer"
                     value={formData.staff_id}
@@ -661,13 +661,13 @@ export default function CreateReturnModal({
                   />
                 </div>
                 <div className="flex justify-between items-center text-sm font-bold pt-2">
-                  <span className="text-gray-700">NCC cần trả</span>
+                  <span className="text-gray-700">Khách sẽ nhận</span>
                   <span className="text-blue-600 text-lg">
                     {mustPay.toLocaleString()}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">NCC đã trả</span>
+                  <span className="text-gray-600">Khách đã nhận</span>
                   <div className="flex items-center w-32 border-b border-blue-500">
                     <input
                       type="number"

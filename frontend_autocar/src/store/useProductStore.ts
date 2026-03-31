@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import type { ProductAdvance, ProductFilterParams } from "../types/product";
 import { productService } from "../services/productService";
+import { customerService } from "../services/customerService";
 
 interface ProductState {
   products: ProductAdvance[];
@@ -13,6 +14,7 @@ interface ProductState {
     categories: any[]; // Danh sách phẳng (Cũ)
     categories_advance: any[]; // Danh sách cây phân cấp (Mới)
     suppliers: any[];
+    customers: any[];
     brands: any[];
     locations: any[];
   };
@@ -37,7 +39,19 @@ const initialFilters: ProductFilterParams = {
   brandIds: [],
   locationIds: [],
 };
-
+// --- HÀM TIỆN ÍCH: Lấy ID chi nhánh từ LocalStorage ---
+const getBranchIdFromLocal = () => {
+  try {
+    const branchData = localStorage.getItem("selected_branch");
+    if (branchData) {
+      const parsedData = JSON.parse(branchData);
+      return parsedData?.id ? [parsedData.id] : [];
+    }
+  } catch (error) {
+    console.error("Lỗi khi parse selected_branch từ localStorage:", error);
+  }
+  return [];
+};
 export const useProductStore = create<ProductState>((set, get) => ({
   products: [],
   total: 0,
@@ -48,6 +62,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
     categories: [],
     categories_advance: [], // Khởi tạo mảng rỗng
     suppliers: [],
+    customers: [],
     brands: [],
     locations: [],
   },
@@ -57,9 +72,18 @@ export const useProductStore = create<ProductState>((set, get) => ({
   fetchProducts: async () => {
     set({ isLoading: true, error: null });
     try {
-      const params = get().filters;
-      // Gọi API lấy sản phẩm
-      const response = await productService.getProducts(params);
+      const currentFilters = { ...get().filters };
+
+      // 2. Nếu locationIds rỗng (người dùng không tự lọc chi nhánh) -> Lấy từ LocalStorage
+      if (
+        !currentFilters.locationIds ||
+        currentFilters.locationIds.length === 0
+      ) {
+        currentFilters.locationIds = getBranchIdFromLocal();
+      }
+
+      // 3. Gọi API lấy sản phẩm với params đã được bổ sung
+      const response = await productService.getProducts(currentFilters);
       const result = response.data;
 
       set({
@@ -94,12 +118,14 @@ export const useProductStore = create<ProductState>((set, get) => ({
         categoriesRes,
         categoriesAdvanceRes, // <--- Thêm biến nhận kết quả mới
         suppliersRes,
+        customersRes,
         brandsRes,
         locationsRes,
       ] = await Promise.all([
         productService.getCategories(), // Gọi API findAll cũ
         productService.getCategoriesAdvance(), // Gọi API findAllAdvance mới
         productService.getSuppliers(),
+        customerService.getCustomers({}),
         productService.getBrands(),
         productService.getLocations(),
       ]);
@@ -109,6 +135,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
           categories: categoriesRes.data || [],
           categories_advance: categoriesAdvanceRes.data || [], // <--- Lưu vào state
           suppliers: suppliersRes.data || [],
+          customers: customersRes.data || [],
           brands: brandsRes.data || [],
           locations: locationsRes.data || [],
         },

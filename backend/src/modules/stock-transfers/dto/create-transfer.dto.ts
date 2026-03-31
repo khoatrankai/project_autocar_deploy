@@ -1,3 +1,4 @@
+import { PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsArray,
@@ -55,4 +56,8 @@ export class RejectTransferDto {
   @IsNotEmpty({ message: 'Vui lòng nhập lý do từ chối' })
   @IsString()
   reason: string;
+}
+
+export class UpdateTransferDto extends PartialType(CreateTransferDto) {
+  // Bạn có thể thêm các trường đặc thù chỉ có khi update ở đây nếu cần
 }

@@ -9,16 +9,21 @@ import {
   UseGuards,
   HttpStatus,
   HttpCode,
+  Put,
+  ParseIntPipe,
+  Delete,
 } from '@nestjs/common';
 import { StockTransfersService } from './stock-transfers.service';
 import {
   CreateTransferDto,
   RejectTransferDto,
+  UpdateTransferDto,
 } from './dto/create-transfer.dto';
 import {
   FilterTransferAdvanceDto,
   FilterTransferDto,
 } from './dto/filter-transfer.dto';
+import { ApiBody, ApiOperation } from '@nestjs/swagger';
 
 // Giả sử bạn có AuthGuard, nếu không thì bỏ @UseGuards
 // import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
@@ -86,5 +91,34 @@ export class StockTransfersController {
   @Post(':id/reject')
   reject(@Param('id') id: string, @Body() dto: RejectTransferDto) {
     return this.stockTransfersService.reject(+id, dto.reason);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Cập nhật phiếu chuyển (Chỉ khi status = pending)' })
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTransferDto,
+    @Query('userId') userId: string,
+  ) {
+    return await this.stockTransfersService.update(id, dto, userId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Xóa một phiếu chuyển (Hoàn lại kho nếu đang pending)',
+  })
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    return await this.stockTransfersService.remove(id);
+  }
+
+  @Post('delete-many')
+  @ApiOperation({ summary: 'Xóa nhiều phiếu chuyển cùng lúc' })
+  @ApiBody({
+    schema: {
+      properties: { ids: { type: 'array', items: { type: 'integer' } } },
+    },
+  })
+  async removeMany(@Body('ids') ids: number[]) {
+    return await this.stockTransfersService.removeMany(ids);
   }
 }

@@ -7,6 +7,7 @@ import {
   UploadedFile,
   UseGuards,
   Query,
+  Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -55,6 +56,55 @@ export class ImportsController {
   @UseInterceptors(FileInterceptor('file'))
   uploadFile(@UploadedFile() file: Express.Multer.File) {
     return this.service.importProducts(file);
+  }
+
+  @Post('products-current')
+  @Roles(UserRole.ADMIN, UserRole.WAREHOUSE) // Chỉ Admin và Thủ kho được nhập
+  @ApiOperation({ summary: 'Import Sản phẩm từ file Excel Current (.xlsx)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'File Excel nhập liệu (theo mẫu)',
+        },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  uploadFileCurrent(@UploadedFile() file: Express.Multer.File) {
+    return this.service.importProductsCurrent(file);
+  }
+
+  @Post('check-product')
+  @Roles(UserRole.ADMIN, UserRole.WAREHOUSE) // Chỉ Admin và Thủ kho được nhập
+  @ApiOperation({ summary: 'Kiểm tra Sản phẩm từ file Excel Current (.xlsx)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'File Excel nhập liệu (theo mẫu)',
+        },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  validateImportProducts(@UploadedFile() file: Express.Multer.File) {
+    return this.service.validateImportProducts(file);
+  }
+
+  @Post('confirm-import')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xác nhận lưu dữ liệu sau khi đã validate' })
+  async confirmImport(@Body() body: { data: any[] }) {
+    return await this.service.confirmImportProducts(body.data);
   }
 
   // ====================================================================
@@ -194,6 +244,57 @@ export class ImportsController {
     const buffer = await this.service.exportPurchaseOrders(selectedColumns);
 
     const fileName = `phieu_nhap_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename=${fileName}`,
+      'Content-Length': (buffer as any).length,
+    });
+
+    res.send(buffer);
+  }
+
+  // ====================================================================
+  // 1. IMPORT KHÁCH HÀNG TỪ EXCEL (POST)
+  // ====================================================================
+  @Post('import-customers')
+  @Roles(UserRole.ADMIN, UserRole.WAREHOUSE)
+  @ApiOperation({ summary: 'Import Khách hàng từ file Excel (.xlsx)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'File Excel danh sách khách hàng',
+        },
+      },
+    },
+  })
+  @UseInterceptors(FileInterceptor('file'))
+  async importCustomers(@UploadedFile() file: Express.Multer.File) {
+    return await this.service.importPartners(file);
+  }
+
+  // ====================================================================
+  // 2. XUẤT DANH SÁCH KHÁCH HÀNG RA EXCEL (GET)
+  // ====================================================================
+  @Get('export-customers')
+  @Roles(UserRole.ADMIN, UserRole.WAREHOUSE)
+  @ApiOperation({
+    summary: 'Xuất danh sách khách hàng ra Excel (Chọn cột tùy chỉnh)',
+  })
+  async exportCustomers(
+    @Res() res: Response,
+    @Query('columns') columns?: string, // Ví dụ: "code,name,phone,debt"
+  ) {
+    // const selectedColumns = columns ? columns.split(',') : null;
+    const buffer = await this.service.exportPartners(res);
+
+    const fileName = `khach_hang_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
 
     res.set({
       'Content-Type':

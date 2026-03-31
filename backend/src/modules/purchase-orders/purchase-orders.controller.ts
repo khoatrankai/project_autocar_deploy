@@ -8,6 +8,9 @@ import {
   Req,
   Request,
   Delete,
+  Put,
+  Param,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -52,6 +55,23 @@ export class PurchaseOrdersController {
   @ApiOperation({ summary: 'Lấy danh sách phiếu nhập (Bộ lọc nâng cao)' })
   findAllAdvance(@Query() filter: FilterPurchaseOrderDto) {
     return this.service.findAllAdvance(filter);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Cập nhật thông tin phiếu nhập hàng' })
+  async update(
+    @Param('id') id: string,
+    @Body() updateDto: any, // Nên tạo UpdatePurchaseOrderDto
+    @Req() req: any,
+  ) {
+    const staffId = req.user.id; // Lấy ID nhân viên từ Token
+    return await this.service.update(+id, updateDto, staffId);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Xem chi tiết một phiếu nhập hàng' })
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    return await this.service.findOne(id);
   }
 
   @Delete()

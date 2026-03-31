@@ -41,27 +41,47 @@ export const customerService = {
   },
 
   // 5. Xuất file Excel
-  exportData: async (columns: string[]) => {
-    const query = columns.length > 0 ? `?columns=${columns.join(",")}` : "";
+  // exportData: async (columns: string[]) => {
+  //   const query = columns.length > 0 ? `?columns=${columns.join(",")}` : "";
 
-    // Gọi endpoint export dành riêng cho customer
-    const response = await axiosClient.get(`/import/customers/export${query}`, {
-      responseType: "blob", // Quan trọng để tải file
-    });
-    return response.data;
-  },
+  //   // Gọi endpoint export dành riêng cho customer
+  //   const response = await axiosClient.get(`/import/customers/export${query}`, {
+  //     responseType: "blob", // Quan trọng để tải file
+  //   });
+  //   return response.data;
+  // },
 
-  // 6. Import file Excel
+  // // 6. Import file Excel
+  // importCustomers: async (file: File) => {
+  //   const formData = new FormData();
+  //   formData.append("file", file);
+
+  //   const response = await axiosClient.post("/import/customers", formData, {
+  //     headers: {
+  //       "Content-Type": "multipart/form-data",
+  //     },
+  //   });
+
+  //   return response.data;
+  // },
+  /** Import danh sách khách hàng từ file Excel */
   importCustomers: async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
+    // axiosClient sẽ tự động xóa header "Content-Type" để trình duyệt set form-data
+    const response = await axiosClient.post(
+      "/import/import-customers",
+      formData,
+    );
+    return response.data;
+  },
 
-    const response = await axiosClient.post("/import/customers", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+  /** Xuất danh sách khách hàng ra Excel */
+  exportCustomers: async (columns?: string) => {
+    const response = await axiosClient.get("/import/export-customers", {
+      params: { columns },
+      responseType: "blob", // Quan trọng: Báo cho axios biết dữ liệu trả về là file (binary)
     });
-
     return response.data;
   },
   getCustomersWithDebt: async () => {

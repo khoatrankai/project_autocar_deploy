@@ -20,6 +20,7 @@ import { useCustomerStore } from "../../store/useCustomerStore";
 import { customerService } from "../../services/customerService";
 import CreateCustomerModal from "./modals/CreateCustomerModal";
 import ExportCustomerModal from "./modals/ExportCustomerModal";
+import { format } from "date-fns";
 
 // Import Custom Components & Store
 
@@ -112,22 +113,58 @@ export default function CustomerTable() {
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    // Validate đuôi file
+    if (!file.name.match(/\.(xlsx|xls)$/)) {
+      toast.error("Vui lòng chọn file Excel (.xlsx, .xls)");
+      if (event.target) event.target.value = "";
+      return;
+    }
+
     setIsImporting(true);
-    // const importPromise = customerService.import(file); // Giả sử có API import
-    const importPromise = new Promise((resolve) => setTimeout(resolve, 1000));
-    toast
-      .promise(importPromise, {
-        loading: "Đang nhập dữ liệu...",
-        success: () => {
-          fetchCustomers();
-          return "Nhập thành công!";
-        },
-        error: "Lỗi khi nhập file",
-      })
-      .finally(() => {
-        setIsImporting(false);
-        if (event.target) event.target.value = "";
-      });
+    const toastId = toast.loading("Đang xử lý dữ liệu nhập...");
+
+    try {
+      const res = await customerService.importCustomers(file);
+      toast.success(res.message || "Nhập danh sách khách hàng thành công!");
+      fetchCustomers(); // Tải lại bảng sau khi nhập
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Lỗi khi nhập file Excel!");
+    } finally {
+      setIsImporting(false);
+      toast.dismiss(toastId);
+      if (event.target) event.target.value = "";
+    }
+  };
+
+  // --- EXPORT KHÁCH HÀNG ---
+  const handleExportClick = async () => {
+    const toastId = toast.loading("Đang xuất file Excel...");
+    try {
+      // Bạn có thể truyền danh sách các cột muốn export vào đây (VD: "code,name,phone")
+      const blob = await customerService.exportCustomers();
+
+      // Tạo link download ẩn và click để tải file
+      const url = window.URL.createObjectURL(new Blob([blob]));
+      const link = document.createElement("a");
+      link.href = url;
+
+      // Tên file tải về
+      const fileName = `khach_hang_export_${format(new Date(), "yyyy-MM-dd")}.xlsx`;
+      link.setAttribute("download", fileName);
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      toast.success("Xuất file thành công!");
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("Lỗi khi xuất file Excel!");
+    } finally {
+      toast.dismiss(toastId);
+    }
   };
 
   const handleSelectAll = () => {
@@ -247,7 +284,7 @@ export default function CustomerTable() {
             </button>
 
             <button
-              onClick={() => setIsExportModalOpen(true)}
+              onClick={handleExportClick}
               className="flex items-center gap-2 px-3 py-2 bg-white text-gray-700 border border-gray-300 rounded hover:bg-gray-50 text-sm"
             >
               <FileDown size={16} />{" "}

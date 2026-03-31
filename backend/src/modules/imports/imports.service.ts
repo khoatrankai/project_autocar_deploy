@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from 'src/shared/prisma/prisma.service';
 import * as ExcelJS from 'exceljs';
+import { Response } from 'express';
 // Removed: import { Readable } from 'stream'; (Not needed for .load())
 
 @Injectable()
@@ -142,6 +143,202 @@ export class ImportsService {
         );
       }
     }
+
+    return results;
+  }
+
+  async importProductsCurrent(file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Vui lòng upload file Excel');
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(file.buffer as any);
+
+    const worksheet = workbook.getWorksheet(1);
+    if (!worksheet) throw new BadRequestException('File không có dữ liệu');
+
+    const results = { total: 0, success: 0, failed: 0, errors: [] as string[] };
+    const categoryCache = new Map<string, bigint>();
+
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+
+      const getCellText = (colIndex: number) => {
+        const cell = row.getCell(colIndex);
+        return cell.value ? cell.value.toString().trim() : '';
+      };
+
+      // MAP LẠI THEO HÌNH ẢNH CỦA BẠN
+      const rawSku = getCellText(1); // Cột A: Mã hàng
+      const rawBrand = getCellText(2); // Cột B: Thương hiệu
+      const rawCategory = getCellText(3) || 'Hàng hóa chung'; // Cột C: Nhóm hàng
+      const rawName = getCellText(4); // Cột D: Tên hàng
+
+      if (!rawSku || !rawName) continue; // Bỏ qua dòng trống
+
+      results.total++;
+
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // A. XỬ LÝ CATEGORY (Dùng hàm resolveCategoryChain có sẵn của bạn)
+          const categoryId = await this.resolveCategoryChain(
+            tx,
+            rawCategory,
+            categoryCache,
+          );
+
+          // B. CHUẨN BỊ DATA PRODUCT
+          const productData = {
+            name: rawName,
+            brand: rawBrand,
+            // Cột 5 (E) là Giá bán, Cột 6 (F) là Giá vốn
+            retail_price: this.parseNumber(row.getCell(5).value),
+            cost_price: this.parseNumber(row.getCell(6).value),
+            unit: getCellText(7) || 'Cái', // Cột 7 (G): ĐVT
+            categories: {
+              connect: { id: categoryId },
+            },
+            // status: 'active',
+          };
+
+          const product = await tx.products.upsert({
+            where: { sku: rawSku },
+            update: productData,
+            create: {
+              sku: rawSku,
+              ...productData,
+            },
+          });
+
+          // C. XỬ LÝ KHÁC (Tương thích xe hoặc Kho nếu cần)
+          // Ví dụ: Mặc định số lượng nhập từ file là 0 nếu không có cột số lượng trong ảnh
+          // Hoặc bạn có thể bổ sung cột số lượng vào Excel và map vào đây.
+        });
+
+        results.success++;
+      } catch (error) {
+        results.failed++;
+        results.errors.push(
+          `Dòng ${rowNumber} (SKU: ${rawSku}): ${error.message}`,
+        );
+      }
+    }
+
+    return results;
+  }
+
+  async validateImportProducts(file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Vui lòng upload file Excel');
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(file.buffer as any);
+    const worksheet = workbook.getWorksheet(1) as any;
+
+    const pendingList = [] as any;
+    const excelSkus = new Set<string>();
+
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      const getCellText = (col: number) =>
+        row.getCell(col).text?.toString().trim();
+
+      const sku = getCellText(1);
+      const name = getCellText(4);
+
+      if (!sku && !name) continue;
+
+      // --- BƯỚC 1: TRÙNG TRONG FILE -> CHẶN LUÔN, BẮT GỬI LẠI ---
+      if (excelSkus.has(sku)) {
+        throw new BadRequestException(
+          `File lỗi: Mã SKU "${sku}" bị lặp lại trong file Excel (dòng ${rowNumber}). Hãy xử lý trùng lặp trong file trước khi gửi lại.`,
+        );
+      }
+      excelSkus.add(sku);
+
+      // --- BƯỚC 2: KIỂM TRA TRÙNG TRONG DATABASE -> ĐÁNH DẤU ĐỂ HỎI Ý KIẾN ---
+      const existingProduct = await this.prisma.products.findUnique({
+        where: { sku },
+        select: { name: true, brand: true },
+      });
+
+      pendingList.push({
+        sku,
+        name,
+        brand: getCellText(2),
+        category_name: getCellText(3) || 'Hàng hóa chung',
+        retail_price: this.parseNumber(row.getCell(5).value),
+        cost_price: this.parseNumber(row.getCell(6).value),
+        unit: getCellText(7) || 'Cái',
+        isExistInDb: !!existingProduct, // Đánh dấu mã đã có trong máy
+        oldData: existingProduct || null,
+      });
+    }
+
+    // --- BƯỚC 3: TRẢ KẾT QUẢ CHO FRONTEND ---
+    const hasDbDuplicate = pendingList.some((p) => p.isExistInDb);
+
+    return {
+      message: hasDbDuplicate
+        ? 'Phát hiện mã hàng đã có trên hệ thống. Bạn có muốn cập nhật đè lên không?'
+        : 'Dữ liệu hợp lệ.',
+      requiresConfirmation: hasDbDuplicate, // FE dựa vào cờ này để hiện Modal hỏi User
+      total: pendingList.length,
+      pendingList,
+    };
+  }
+
+  async confirmImportProducts(data: any[]) {
+    const results = {
+      success: 0,
+      failed: 0,
+      errors: [] as string[],
+    };
+
+    const categoryCache = new Map<string, bigint>();
+
+    // Sử dụng Transaction để đảm bảo an toàn dữ liệu
+    await this.prisma.$transaction(
+      async (tx) => {
+        for (const item of data) {
+          try {
+            // 1. Xử lý Category ID (vì FE gửi tên nhóm hàng lên)
+            const categoryId = await this.resolveCategoryChain(
+              tx,
+              item.category_name,
+              categoryCache,
+            );
+
+            const productData = {
+              name: item.name,
+              brand: item.brand,
+              retail_price: item.retail_price,
+              cost_price: item.cost_price,
+              unit: item.unit,
+              categories: {
+                connect: { id: categoryId },
+              },
+            };
+
+            // 2. Thực thi ghi đè hoặc tạo mới
+            await tx.products.upsert({
+              where: { sku: item.sku },
+              update: productData, // Ghi đè thông tin mới nếu trùng DB
+              create: {
+                sku: item.sku,
+                ...productData,
+              },
+            });
+
+            results.success++;
+          } catch (error) {
+            results.failed++;
+            results.errors.push(`SKU ${item.sku}: ${error.message}`);
+          }
+        }
+      },
+      {
+        timeout: 60000, // Tăng timeout nếu file có hàng nghìn dòng
+      },
+    );
 
     return results;
   }
@@ -980,5 +1177,124 @@ export class ImportsService {
     });
 
     return await workbook.xlsx.writeBuffer();
+  }
+
+  // =================================================================
+  // 1. IMPORT CUSTOMER (Theo thứ tự cột trong ảnh)
+  // =================================================================
+  async importPartners(file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Vui lòng upload file Excel');
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(file.buffer as any);
+    const worksheet = workbook.getWorksheet(1) as any;
+
+    const results = { total: 0, success: 0, failed: 0, errors: [] as string[] };
+
+    for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber++) {
+      const row = worksheet.getRow(rowNumber);
+      const getVal = (col: number) => row.getCell(col).text?.toString().trim();
+
+      const code = getVal(1); // Cột 1: Mã khách hàng
+      const name = getVal(2); // Cột 2: Tên khách hàng
+      const phone = getVal(3); // Cột 3: Điện thoại
+      const category = getVal(4); // Cột 4: Nhóm KH (Cần xử lý nếu schema có bảng riêng)
+      const address = getVal(5); // Cột 5: Địa chỉ
+
+      if (!name) continue;
+      results.total++;
+
+      try {
+        await this.prisma.partners.upsert({
+          where: { code: code || `KH${Date.now()}${rowNumber}` },
+          update: { name, phone, address, type: 'customer' },
+          create: {
+            code: code || `KH${Date.now()}${rowNumber}`,
+            name,
+            phone,
+            address,
+            type: 'customer',
+            status: 'active',
+            // current_debt, total_revenue sẽ mặc định là 0 khi tạo mới
+          },
+        });
+        results.success++;
+      } catch (error) {
+        results.failed++;
+        results.errors.push(`Dòng ${rowNumber}: ${error.message}`);
+      }
+    }
+    return results;
+  }
+
+  // =================================================================
+  // 2. EXPORT CUSTOMER (Khớp 100% thứ tự cột trong ảnh)
+  // =================================================================
+  async exportPartners(res: Response) {
+    const partners = await this.prisma.partners.findMany({
+      where: { type: 'customer' },
+      orderBy: { created_at: 'desc' },
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Danh_Sach_Khach_Hang');
+
+    // Thiết lập Header theo đúng ảnh bạn gửi
+    worksheet.columns = [
+      { header: 'Mã Khách hàng', key: 'code', width: 15 },
+      { header: 'Tên khách hàng', key: 'name', width: 25 },
+      { header: 'Điện thoại', key: 'phone', width: 15 },
+      { header: 'Nhóm KH', key: 'category', width: 15 },
+      { header: 'Địa chỉ', key: 'address', width: 30 },
+      { header: 'Nợ hiện tại', key: 'debt', width: 15 },
+      { header: 'Tổng bán', key: 'total_sale', width: 15 },
+      { header: 'Tổng bán trừ trả hàng', key: 'net_sale', width: 20 },
+    ];
+
+    // Định dạng Header (In đậm, nền xám nhẹ)
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).alignment = {
+      vertical: 'middle',
+      horizontal: 'center',
+    };
+
+    // Thêm dữ liệu
+    partners.forEach((p) => {
+      const debt = Number(p.current_debt || 0);
+      const totalSale = Number(p.total_revenue || 0);
+
+      // Giả sử Net Sale = Tổng bán (Bạn có thể trừ đi tiền trả hàng nếu có bảng Returns)
+      const netSale = totalSale;
+
+      const row = worksheet.addRow({
+        code: p.code,
+        name: p.name,
+        phone: p.phone,
+        category: '---', // Thay bằng p.category.name nếu có quan hệ
+        address: p.address,
+        debt: debt,
+        total_sale: totalSale,
+        net_sale: netSale,
+      });
+
+      // Format màu đỏ cho cột "Nợ hiện tại" giống trong ảnh
+      if (debt > 0) {
+        row.getCell('debt').font = { color: { argb: 'FFFF0000' }, bold: true };
+      }
+    });
+
+    // Format số cho các cột tiền
+    ['debt', 'total_sale', 'net_sale'].forEach((key) => {
+      worksheet.getColumn(key).numFmt = '#,##0';
+    });
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename=KhachHang.xlsx');
+
+    await workbook.xlsx.write(res);
+    res.end();
   }
 }

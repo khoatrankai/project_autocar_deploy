@@ -91,7 +91,7 @@ export class ProductsService {
 
     // Khởi tạo điều kiện lọc
     const whereCondition: any = {
-      AND: [],
+      AND: [{ is_deleted: false }],
     };
 
     // 1. Tìm kiếm chung (Tên hoặc SKU)
@@ -256,7 +256,7 @@ export class ProductsService {
     // 1. XÂY DỰNG ĐIỀU KIỆN LỌC (WHERE) CHO SẢN PHẨM
     // ---------------------------------------------------------
     const where: Prisma.productsWhereInput = {
-      AND: [],
+      AND: [{ is_deleted: false }],
     };
     const andConditions = where.AND as Prisma.productsWhereInput[];
 
@@ -304,11 +304,11 @@ export class ProductsService {
       const inventoryWhere: Prisma.InventoryListRelationFilter = {};
 
       // Nếu chọn kho cụ thể -> Sản phẩm phải có bản ghi ở kho đó
-      if (locationIds && locationIds.length > 0) {
-        inventoryWhere.some = Object.assign(inventoryWhere.some || {}, {
-          warehouse_id: { in: locationIds.map((id) => BigInt(id)) },
-        });
-      }
+      // if (locationIds && locationIds.length > 0) {
+      //   inventoryWhere.some = Object.assign(inventoryWhere.some || {}, {
+      //     warehouse_id: { in: locationIds.map((id) => BigInt(id)) },
+      //   });
+      // }
 
       // Logic trạng thái tồn
       if (stockStatus === 'in_stock') {
@@ -580,20 +580,84 @@ export class ProductsService {
     };
   }
 
-  async removeMultiple(ids: number[]) {
-    // Chuyển đổi ID nếu cần (vì DB là BigInt, DTO nhận vào là number/string)
-    // Nếu DB dùng BigInt, bạn cần map sang BigInt
+  // async removeMultiple(ids: number[], userId: string) {
+  //   const bigIntIds = ids.map((id) => BigInt(id));
+  //   const batchCode = `DELETE_PROD_${Date.now()}`;
+
+  //   return await this.prisma.$transaction(async (tx) => {
+  //     // 1. Lấy thông tin các sản phẩm sắp bị xóa (kèm theo inventory và compatibility để backup)
+  //     const productsToDelete = await tx.products.findMany({
+  //       where: { id: { in: bigIntIds } },
+  //       include: {
+  //         product_compatibility: true,
+  //         inventory: true,
+  //       },
+  //     });
+
+  //     if (productsToDelete.length === 0) {
+  //       throw new BadRequestException(
+  //         'Không tìm thấy sản phẩm nào hợp lệ để xóa.',
+  //       );
+  //     }
+
+  //     // 2. Lưu vào bảng system_backups TRƯỚC KHI xóa
+  //     await tx.system_backups.createMany({
+  //       data: productsToDelete.map((item) => ({
+  //         entity_type: 'products',
+  //         entity_id: item.id.toString(),
+  //         data: item as any, // Lưu nguyên trạng cấu trúc JSON
+  //         action_type: 'DELETE', // Đánh dấu là hành động xóa
+  //         batch_code: batchCode,
+  //         note: 'Xóa sản phẩm từ danh sách',
+  //         created_by: userId || null,
+  //       })),
+  //     });
+
+  //     // 3. Thực hiện xóa vật lý khỏi bảng products
+  //     const result = await tx.products.deleteMany({
+  //       where: {
+  //         id: { in: bigIntIds },
+  //       },
+  //     });
+
+  //     return {
+  //       statusCode: 200,
+  //       message: `Đã xóa và đưa vào thùng rác thành công ${result.count} sản phẩm`,
+  //       batchCode: batchCode,
+  //     };
+  //   });
+  // }
+
+  async removeMultiple(ids: number[], userId: string, reason?: string) {
     const bigIntIds = ids.map((id) => BigInt(id));
 
-    const result = await this.prisma.products.deleteMany({
-      where: {
-        id: { in: bigIntIds },
-      },
+    console.log('📌 IDs cần xóa:', bigIntIds);
+
+    const products = await this.prisma.products.findMany({
+      where: { id: { in: bigIntIds } }, // Tạm thời XÓA BỎ điều kiện is_deleted: false để test
+      select: { id: true, sku: true, is_deleted: true }, // Select thêm is_deleted để xem trạng thái
     });
+
+    console.log('📌 Sản phẩm tìm thấy trong DB:', products);
+
+    const now = Date.now();
+    let count = 0;
+
+    for (const p of products) {
+      await this.prisma.products.update({
+        where: { id: p.id },
+        data: {
+          is_deleted: true,
+          deleted_at: new Date(),
+          sku: `${p.sku}_DEL_${now}`,
+        },
+      });
+      count++;
+    }
 
     return {
       statusCode: 200,
-      message: `Đã xóa thành công ${result.count} sản phẩm`,
+      message: `Đã đưa ${count} sản phẩm vào thùng rác.`,
     };
   }
 
@@ -697,7 +761,7 @@ export class ProductsService {
     const { keyword, car_model } = query;
 
     // Build the WHERE clause dynamically
-    const where: any = {};
+    const where: any = { is_deleted: false };
 
     // 1. Keyword Search (Name or SKU)
     if (keyword) {
@@ -798,6 +862,193 @@ export class ProductsService {
     return {
       message: `Đã xóa thương hiệu "${brandName}".`,
       deletedCount: result.count,
+    };
+  }
+
+  // // ====================================================================
+  // // XÓA TOÀN BỘ SẢN PHẨM (CÓ SAO LƯU 30 NGÀY)
+  // // ====================================================================
+  // async clearAllProductsWithBackup(userId: string, reason: string) {
+  //   const batchCode = `CLEAR_PROD_${Date.now()}`;
+
+  //   return await this.prisma.$transaction(
+  //     async (tx) => {
+  //       // 1. Lấy toàn bộ sản phẩm kèm theo các quan hệ (Compatibility, Inventory)
+  //       // Việc lấy cả quan hệ giúp khi Restore ta khôi phục được nguyên trạng
+  //       const allProducts = await tx.products.findMany({
+  //         include: {
+  //           product_compatibility: true,
+  //           inventory: true,
+  //         },
+  //       });
+
+  //       if (allProducts.length === 0) {
+  //         return { message: 'Không có sản phẩm nào để xóa', count: 0 };
+  //       }
+
+  //       // 2. Lưu toàn bộ dữ liệu vào bảng system_backups
+  //       // Ta lưu nguyên object 'item' (đã bao gồm mảng compatibility và inventory bên trong)
+  //       await tx.system_backups.createMany({
+  //         data: allProducts.map((item) => ({
+  //           entity_type: 'products',
+  //           entity_id: item.id.toString(),
+  //           data: item as any, // JSON bao gồm cả các bảng con
+  //           action_type: 'CLEAR_ALL_PRODUCTS',
+  //           batch_code: batchCode,
+  //           note: reason,
+  //           created_by: userId,
+  //         })),
+  //       });
+
+  //       // 3. Thực hiện xóa sạch
+  //       // Nhờ quan hệ Cascade trong Prisma, khi xóa Products thì Inventory và Compatibility tự mất theo
+
+  //       await tx.purchase_order_items.deleteMany({});
+  //       await tx.order_items.deleteMany({});
+  //       await tx.return_items.deleteMany({});
+  //       await tx.stock_transfer_items.deleteMany({});
+  //       await tx.inventory_logs.deleteMany({});
+  //       const result = await tx.products.deleteMany({});
+
+  //       return {
+  //         message: `Đã xóa sạch ${result.count} sản phẩm và tạo bản sao lưu.`,
+  //         batchCode: batchCode,
+  //       };
+  //     },
+  //     {
+  //       maxWait: 10000, // Thời gian chờ tối đa để DB cấp phát transaction (10 giây)
+  //       timeout: 300000, // Tăng giới hạn chạy lên 300.000 ms (5 phút)
+  //     },
+  //   ); // Tăng timeout vì dữ liệu sản phẩm thường rất lớn
+  // }
+
+  // ====================================================================
+  // 3. KHÔI PHỤC SẢN PHẨM BỊ XÓA TRONG 1 THÁNG
+  // ====================================================================
+  async restoreAllProductDeletedInLastMonth() {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // 1. Tìm các sản phẩm nằm trong thùng rác (< 30 ngày)
+    const deletedProducts = await this.prisma.products.findMany({
+      where: {
+        is_deleted: true,
+        deleted_at: { gte: thirtyDaysAgo },
+      },
+    });
+
+    if (deletedProducts.length === 0) {
+      return {
+        message: 'Không có sản phẩm nào bị xóa trong 1 tháng qua để khôi phục.',
+        count: 0,
+      };
+    }
+
+    let restoredCount = 0;
+
+    // 2. Khôi phục từng sản phẩm
+    for (const p of deletedProducts) {
+      const originalSku = p.sku.split('_DEL_')[0];
+
+      // Kiểm tra xem trong lúc sản phẩm bị xóa, có ai tạo mã SKU đó lại chưa
+      const isSkuTaken = await this.prisma.products.findFirst({
+        where: { sku: originalSku, is_deleted: false },
+      });
+
+      // Nếu SKU bị chiếm thì thêm đuôi RESTORED để tránh lỗi trùng lặp Database
+      const newSku = isSkuTaken
+        ? `${originalSku}_RESTORED_${Date.now()}`
+        : originalSku;
+
+      await this.prisma.products.update({
+        where: { id: p.id },
+        data: {
+          is_deleted: false, // Lôi ra khỏi thùng rác
+          deleted_at: null,
+          sku: newSku,
+        },
+      });
+
+      restoredCount++;
+    }
+
+    return {
+      message: `Đã khôi phục thành công ${restoredCount} sản phẩm.`,
+      count: restoredCount,
+    };
+  }
+
+  async backupProducts(ids: string[], userId: string, reason: string) {
+    // 1. Tạo mã phiên (Batch Code) để dễ dàng Restore nguyên đợt
+    const batchCode = `MANUAL_PROD_${Date.now()}`;
+    const bigIntIds = ids.map((id) => BigInt(id));
+
+    return await this.prisma.$transaction(async (tx) => {
+      // 2. Lấy toàn bộ dữ liệu gốc cùng các bảng con (Deep Clone)
+      const productsToBackup = await tx.products.findMany({
+        where: { id: { in: bigIntIds } },
+        include: {
+          product_compatibility: true, // Lưu danh sách xe
+          inventory: true, // Lưu tồn kho tại các kho
+        },
+      });
+
+      if (productsToBackup.length === 0) {
+        throw new BadRequestException(
+          'Không tìm thấy sản phẩm nào để sao lưu.',
+        );
+      }
+
+      // 3. Đưa vào "Kho lưu trữ" system_backups
+      await tx.system_backups.createMany({
+        data: productsToBackup.map((product) => ({
+          entity_type: 'products',
+          entity_id: product.id.toString(),
+          data: product as any, // Lưu nguyên object (bao gồm cả mảng con) vào cột JSON
+          action_type: 'MANUAL_BACKUP',
+          batch_code: batchCode,
+          note: reason,
+          created_by: userId,
+        })),
+      });
+
+      return {
+        message: `Đã sao lưu thành công ${productsToBackup.length} sản phẩm.`,
+        batchCode: batchCode,
+      };
+    });
+  }
+
+  async clearAllProductsWithBackup(userId: string, reason: string) {
+    // 1. Lấy những sản phẩm chưa bị xóa
+    const products = await this.prisma.products.findMany({
+      where: { is_deleted: false },
+      select: { id: true, sku: true },
+    });
+
+    if (products.length === 0) {
+      return { message: 'Không có sản phẩm nào để xóa.', count: 0 };
+    }
+
+    let count = 0;
+    const now = Date.now();
+
+    // 2. Chạy vòng lặp đổi trạng thái (Mini-transactions ẩn)
+    for (const p of products) {
+      await this.prisma.products.update({
+        where: { id: p.id },
+        data: {
+          is_deleted: true,
+          deleted_at: new Date(),
+          sku: `${p.sku}_DEL_${now}`, // Giải phóng mã SKU cũ
+        },
+      });
+      count++;
+    }
+
+    return {
+      message: `Đã đưa ${count} sản phẩm vào thùng rác. Lý do: ${reason}`,
+      count: count,
     };
   }
 }

@@ -10,32 +10,51 @@ import { CreateTransferDto } from './dto/create-transfer.dto';
 export class StockTransfersService {
   constructor(private prisma: PrismaService) {}
 
+  private async generateTransferCode(tx: any, prefix: string): Promise<string> {
+    const currentYear = new Date().getFullYear();
+    const prefixWithVer = `${prefix}00`; // Ví dụ: 'TRF00'
+
+    const lastTransfer = await tx.stock_transfers.findFirst({
+      where: {
+        code: {
+          startsWith: prefixWithVer,
+          endsWith: currentYear.toString(),
+        },
+      },
+      orderBy: { code: 'desc' },
+    });
+
+    let nextStt = 1;
+    if (lastTransfer) {
+      const lastCode = lastTransfer.code;
+      // Cắt bỏ tiền tố và hậu tố năm để lấy số thứ tự
+      const sttString = lastCode.slice(prefixWithVer.length, -4);
+      nextStt = (parseInt(sttString) || 0) + 1;
+    }
+
+    const paddedStt = nextStt.toString().padStart(3, '0');
+    return `${prefixWithVer}${paddedStt}${currentYear}`; // TRF000012026
+  }
   // =================================================================
   // 1. TẠO PHIẾU CHUYỂN
   // =================================================================
-  async create(dto: CreateTransferDto, userId: string) {
+  async create(dto: any, userId: string) {
     return this.prisma.$transaction(async (tx) => {
-      // 1. XỬ LÝ MÃ PHIẾU (AUTO GENERATE)
-      let finalCode = dto.code;
-      if (!finalCode) {
-        // Nếu không có mã, tự sinh theo format: TRF + YYYYMMDD + Random 4 số
-        // Ví dụ: TRF202310258821
-        const now = new Date();
-        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ''); // 20231025
-        const randomSuffix = Math.floor(1000 + Math.random() * 9000); // 1000-9999
-        finalCode = `TRF${dateStr}${randomSuffix}`;
-      }
+      // 1. XỬ LÝ MÃ PHIẾU
+      // Nếu user gửi mã thì dùng, không thì tự sinh mã chuẩn
+      const finalCode =
+        dto.code || (await this.generateTransferCode(tx, 'TRF'));
 
-      // Validate kho
+      // 2. Validate kho
       if (dto.from_warehouse_id === dto.to_warehouse_id) {
         throw new BadRequestException('Kho nhận và kho gửi phải khác nhau');
       }
 
-      // Khai báo kiểu any[] để tránh lỗi TS
-      const itemsData: any[] = [];
+      // 3. Xử lý trừ kho và ghi log
+      // Khai báo kiểu chuẩn thay vì any[]
+      const itemsData: { product_id: bigint; quantity: number }[] = [];
 
       for (const item of dto.items) {
-        // Lấy thông tin SP & Tồn kho
         const product = await tx.products.findUnique({
           where: { id: BigInt(item.product_id) },
           include: {
@@ -51,20 +70,17 @@ export class StockTransfersService {
           );
         }
 
-        // Lấy tồn kho hiện tại (Fallback về 0 nếu null/undefined)
         const currentStock = product.inventory[0]?.quantity ?? 0;
 
-        // Check tồn kho
         if (currentStock < item.quantity) {
           throw new BadRequestException(
             `Sản phẩm ${product.sku} không đủ tồn kho (Tồn: ${currentStock}, Chuyển: ${item.quantity})`,
           );
         }
 
-        // Chuẩn bị data tạo items
         itemsData.push({
           product_id: BigInt(item.product_id),
-          quantity: item.quantity,
+          quantity: Number(item.quantity),
         });
 
         // TRỪ KHO NGAY LẬP TỨC
@@ -83,32 +99,45 @@ export class StockTransfersService {
           data: {
             warehouse_id: BigInt(dto.from_warehouse_id),
             product_id: BigInt(item.product_id),
-            change_amount: -item.quantity, // Số âm
+            change_amount: -item.quantity,
             balance_after: currentStock - item.quantity,
             type: 'transfer_out',
-            reference_code: finalCode, // <--- SỬ DỤNG MÃ ĐÃ XỬ LÝ
+            reference_code: finalCode,
             note: `Chuyển đến kho ID ${dto.to_warehouse_id}`,
           },
         });
       }
 
-      // Tạo phiếu Header
+      // 4. Tạo phiếu Header
       const transfer = await tx.stock_transfers.create({
         data: {
-          code: finalCode, // <--- SỬ DỤNG MÃ ĐÃ XỬ LÝ
+          code: finalCode,
           from_warehouse_id: BigInt(dto.from_warehouse_id),
           to_warehouse_id: BigInt(dto.to_warehouse_id),
-          staff_id: (dto.staff_id as any) || userId,
-          status: (dto.status as any) || 'pending',
+          staff_id: dto.staff_id || userId,
+          status: dto.status || 'pending',
           note: dto.note,
           transfer_date: new Date(),
           stock_transfer_items: {
             createMany: { data: itemsData },
           },
         },
+        include: { stock_transfer_items: true },
       });
 
-      return transfer;
+      // 5. Ép kiểu BigInt sang String để trả về Frontend an toàn
+      return {
+        ...transfer,
+        id: transfer.id.toString(),
+        from_warehouse_id: transfer.from_warehouse_id?.toString(),
+        to_warehouse_id: transfer.to_warehouse_id?.toString(),
+        stock_transfer_items: transfer.stock_transfer_items.map((item) => ({
+          ...item,
+          id: item.id.toString(),
+          transfer_id: item.transfer_id?.toString(),
+          product_id: item.product_id?.toString(),
+        })),
+      };
     });
   }
 
@@ -522,5 +551,190 @@ export class StockTransfersService {
         ),
       );
     });
+  }
+
+  // =================================================================
+  // 6. CẬP NHẬT PHIẾU (Chỉ khi status = pending)
+  // =================================================================
+  async update(id: number, dto: any, userId: string) {
+    const transferId = BigInt(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      const currentTransfer = await tx.stock_transfers.findUnique({
+        where: { id: transferId },
+        include: { stock_transfer_items: true },
+      });
+
+      if (!currentTransfer) throw new NotFoundException('Phiếu không tồn tại');
+      if (currentTransfer.status !== 'pending') {
+        throw new BadRequestException(
+          'Chỉ có thể sửa phiếu ở trạng thái pending',
+        );
+      }
+
+      const fromWarehouseId = dto.from_warehouse_id
+        ? BigInt(dto.from_warehouse_id)
+        : currentTransfer.from_warehouse_id;
+
+      if (!fromWarehouseId) {
+        throw new BadRequestException('Thiếu thông tin kho gửi');
+      }
+
+      if (dto.items && dto.items.length > 0) {
+        // 1. Hoàn lại số lượng vào kho cũ
+        for (const oldItem of currentTransfer.stock_transfer_items) {
+          if (oldItem.product_id && currentTransfer.from_warehouse_id) {
+            await tx.inventory.updateMany({
+              where: {
+                product_id: oldItem.product_id,
+                warehouse_id: currentTransfer.from_warehouse_id,
+              },
+              data: { quantity: { increment: oldItem.quantity ?? 0 } },
+            });
+          }
+        }
+
+        // 2. Xóa items cũ
+        await tx.stock_transfer_items.deleteMany({
+          where: { transfer_id: transferId },
+        });
+
+        // 3. Trừ kho theo items mới
+        const newItemsData: { product_id: bigint; quantity: number }[] = [];
+
+        for (const newItem of dto.items) {
+          const inv = await tx.inventory.findUnique({
+            where: {
+              product_id_warehouse_id: {
+                product_id: BigInt(newItem.product_id),
+                warehouse_id: fromWarehouseId,
+              },
+            },
+          });
+
+          const currentStock = inv?.quantity ?? 0;
+
+          if (currentStock < newItem.quantity) {
+            throw new BadRequestException(
+              `Sản phẩm ID ${newItem.product_id} không đủ tồn kho`,
+            );
+          }
+
+          // Trừ kho mới
+          await tx.inventory.update({
+            where: { id: inv!.id },
+            data: { quantity: { decrement: newItem.quantity } },
+          });
+
+          newItemsData.push({
+            product_id: BigInt(newItem.product_id),
+            quantity: Number(newItem.quantity),
+          });
+        }
+
+        // 4. Tạo items mới
+        await tx.stock_transfer_items.createMany({
+          data: newItemsData.map((item) => ({
+            transfer_id: transferId,
+            product_id: item.product_id,
+            quantity: item.quantity,
+          })),
+        });
+      }
+
+      // Cập nhật Header
+      const updated = await tx.stock_transfers.update({
+        where: { id: transferId },
+        data: {
+          from_warehouse_id: fromWarehouseId,
+          to_warehouse_id: dto.to_warehouse_id
+            ? BigInt(dto.to_warehouse_id)
+            : undefined,
+          note: dto.note,
+          staff_id: userId,
+        },
+        include: { stock_transfer_items: true },
+      });
+
+      // Format trả về Frontend (Thay cho JSON.parse)
+      return {
+        ...updated,
+        id: updated.id.toString(),
+        from_warehouse_id: updated.from_warehouse_id?.toString(),
+        to_warehouse_id: updated.to_warehouse_id?.toString(),
+        stock_transfer_items: updated.stock_transfer_items.map((i) => ({
+          ...i,
+          id: i.id.toString(),
+          transfer_id: i.transfer_id?.toString(),
+          product_id: i.product_id?.toString(),
+        })),
+      };
+    });
+  }
+
+  // =================================================================
+  // 7. XÓA MỘT PHIẾU (Chỉ khi status = pending)
+  // =================================================================
+  async remove(id: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const transfer = await tx.stock_transfers.findUnique({
+        where: { id: BigInt(id) },
+        include: { stock_transfer_items: true },
+      });
+
+      if (!transfer) throw new NotFoundException('Phiếu không tồn tại');
+      if (transfer.status !== 'pending' && transfer.status !== 'cancelled') {
+        throw new BadRequestException('Không thể xóa phiếu đã hoàn thành');
+      }
+
+      if (transfer.status === 'pending') {
+        for (const item of transfer.stock_transfer_items) {
+          // Kiểm tra chắc chắn không null trước khi update
+          if (item.product_id && transfer.from_warehouse_id) {
+            await tx.inventory.update({
+              where: {
+                product_id_warehouse_id: {
+                  product_id: item.product_id,
+                  warehouse_id: transfer.from_warehouse_id,
+                },
+              },
+              data: { quantity: { increment: item.quantity || 0 } },
+            });
+          }
+        }
+      }
+
+      await tx.stock_transfer_items.deleteMany({
+        where: { transfer_id: BigInt(id) },
+      });
+      await tx.stock_transfers.delete({ where: { id: BigInt(id) } });
+
+      return { message: 'Xóa phiếu thành công' };
+    });
+  }
+
+  async removeMany(ids: number[]) {
+    // Fix lỗi 'never' bằng cách định nghĩa kiểu cho mảng details
+    const results: {
+      success: number;
+      failed: number;
+      details: { id: number; error: string }[];
+    } = {
+      success: 0,
+      failed: 0,
+      details: [],
+    };
+
+    for (const id of ids) {
+      try {
+        await this.remove(id);
+        results.success++;
+      } catch (error: any) {
+        results.failed++;
+        results.details.push({ id, error: error.message });
+      }
+    }
+
+    return results;
   }
 }

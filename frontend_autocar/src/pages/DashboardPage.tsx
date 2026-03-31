@@ -25,11 +25,12 @@ import {
   Receipt,
   Download,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { format } from "date-fns";
 import toast from "react-hot-toast";
 
-// Import API Services (Đảm bảo đường dẫn đúng với cấu trúc thư mục của bạn)
+// Import API Services
 import { orderService } from "../services/orderService";
 import { transactionService } from "../services/transactionService";
 import { dashboardService } from "../services/dashboardService";
@@ -60,7 +61,41 @@ const COLORS = [
   "#6366f1",
 ];
 
-// Mock data nhân viên (Sau này bạn có thể fetch từ API danh sách user)
+// --- HELPER LẤY KHOẢNG THỜI GIAN THEO KIỂU LỌC ---
+const getFilterDates = (type: string) => {
+  const now = new Date();
+  let startDate: Date;
+  let endDate: Date;
+
+  switch (type) {
+    case "day":
+      startDate = new Date();
+      endDate = new Date();
+      break;
+    case "month":
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      break;
+    case "quarter": {
+      const currentQuarter = Math.floor(now.getMonth() / 3);
+      startDate = new Date(now.getFullYear(), currentQuarter * 3, 1);
+      endDate = new Date(now.getFullYear(), currentQuarter * 3 + 3, 0);
+      break;
+    }
+    case "year":
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date(now.getFullYear(), 11, 31);
+      break;
+    default:
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  }
+
+  return {
+    from_date: format(startDate, "yyyy-MM-dd"),
+    to_date: format(endDate, "yyyy-MM-dd"),
+  };
+};
 
 export default function DashboardPage() {
   // ==========================================
@@ -75,7 +110,7 @@ export default function DashboardPage() {
     fetchFilterOptions: fetchFilterPurchase,
   } = usePurchaseOrderStore();
 
-  // Filters
+  // Filters Toàn cục
   const [dateFilter, setDateFilter] = useState({
     startDate: format(new Date(), "yyyy-MM-01"),
     endDate: format(new Date(), "yyyy-MM-dd"),
@@ -86,16 +121,42 @@ export default function DashboardPage() {
     year: new Date().getFullYear(),
   });
 
-  // Data: Tab Overview
+  // --- FILTERS ĐỘC LẬP CHO TỪNG BẢNG Ở OVERVIEW ---
+  const [chartTime, setChartTime] = useState<string>("month");
+  const [chartCustom, setChartCustom] = useState({
+    start: dateFilter.startDate,
+    end: dateFilter.endDate,
+  });
+
+  const [productTime, setProductTime] = useState<string>("month");
+  const [productCustom, setProductCustom] = useState({
+    start: dateFilter.startDate,
+    end: dateFilter.endDate,
+  });
+
+  const [customerTime, setCustomerTime] = useState<string>("month");
+  const [customerCustom, setCustomerCustom] = useState({
+    start: dateFilter.startDate,
+    end: dateFilter.endDate,
+  });
+
+  // Data: Tab Overview Chung
   const [revenueData, setRevenueData] = useState<any>(null);
+  const [activities, setActivities] = useState<any[]>([]);
+  const [dailySales, setDailySales] = useState<any[]>([]);
+  const [loadingOverview, setLoadingOverview] = useState(false);
+
+  // Data: Tab Overview Thành phần độc lập
   const [chartData, setChartData] = useState<any[]>([]);
   const [warehouseKeys, setWarehouseKeys] = useState<string[]>([]);
   const [hiddenKeys, setHiddenKeys] = useState<string[]>([]);
   const [topProducts, setTopProducts] = useState<any[]>([]);
   const [topCustomers, setTopCustomers] = useState<any[]>([]);
-  const [activities, setActivities] = useState<any[]>([]);
-  const [dailySales, setDailySales] = useState<any[]>([]);
-  const [loadingOverview, setLoadingOverview] = useState(false);
+
+  // Loading states cho các thành phần độc lập
+  const [loadingChart, setLoadingChart] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingCustomers, setLoadingCustomers] = useState(false);
 
   // Data: Tab Debts
   const [debtCustomers, setDebtCustomers] = useState<any[]>([]);
@@ -116,74 +177,112 @@ export default function DashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ==========================================
-  // 2. FETCH DATA
+  // 2. FETCH DATA ĐỘC LẬP
   // ==========================================
-  const fetchOverview = async () => {
+
+  // A. Data Tổng quan (Chỉ chạy khi đổi Tab hoặc dateFilter chính)
+  const fetchOverviewGlobal = async () => {
     setLoadingOverview(true);
     try {
-      const [
-        resProfit,
-        resChart,
-        resProducts,
-        resCustomers,
-        resActivities,
-        resDaily,
-      ] = await Promise.all([
+      const [resProfit, resActivities, resDaily] = await Promise.all([
         orderService.getRevenueAndProfit(
           dateFilter.startDate,
           dateFilter.endDate,
         ),
-        dashboardService.getChart({
-          from_date: dateFilter.startDate,
-          to_date: dateFilter.endDate,
-        }),
-        dashboardService.getTopProducts({
-          from_date: dateFilter.startDate,
-          to_date: dateFilter.endDate,
-        }),
-        dashboardService.getTopCustomers({
-          from_date: dateFilter.startDate,
-          to_date: dateFilter.endDate,
-        }),
         dashboardService.getActivities(),
-        orderService.getDailySales(dateFilter.startDate), // Chi tiết bán hàng ngày
+        orderService.getDailySales(dateFilter.startDate),
       ]);
-
-      // Set state
       setRevenueData(resProfit.data || resProfit);
-      setTopProducts(
-        Array.isArray(resProducts?.data?.data) ? resProducts.data.data : [],
-      );
-      setTopCustomers(
-        Array.isArray(resCustomers?.data?.data) ? resCustomers.data.data : [],
-      );
       setActivities(
         Array.isArray(resActivities?.data?.data) ? resActivities.data.data : [],
       );
       setDailySales(
         Array.isArray(resDaily?.data) ? resDaily.data : resDaily || [],
       );
-
-      // Xử lý biểu đồ
-      const rawChartData = Array.isArray(resChart?.data?.data)
-        ? resChart.data.data
-        : [];
-      setChartData(rawChartData);
-      const keys = new Set<string>();
-      rawChartData.forEach((item: any) => {
-        Object.keys(item).forEach((key) => {
-          if (key !== "date") keys.add(key);
-        });
-      });
-      setWarehouseKeys(Array.from(keys));
     } catch (error) {
-      console.error("Lỗi tải overview:", error);
-      toast.error("Lỗi tải dữ liệu tổng quan");
+      toast.error("Lỗi tải dữ liệu tổng quan chung");
     } finally {
       setLoadingOverview(false);
     }
   };
 
+  // B. Biểu đồ doanh thu
+  useEffect(() => {
+    if (activeTab !== "overview") return;
+    const fetchChart = async () => {
+      setLoadingChart(true);
+      try {
+        const dates =
+          chartTime === "custom"
+            ? { from_date: chartCustom.start, to_date: chartCustom.end }
+            : getFilterDates(chartTime);
+
+        const res = await dashboardService.getChart(dates);
+        const rawChartData = Array.isArray(res?.data?.data)
+          ? res.data.data
+          : [];
+        setChartData(rawChartData);
+        const keys = new Set<string>();
+        rawChartData.forEach((item: any) => {
+          Object.keys(item).forEach((key) => {
+            if (key !== "date") keys.add(key);
+          });
+        });
+        setWarehouseKeys(Array.from(keys));
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoadingChart(false);
+      }
+    };
+    fetchChart();
+  }, [chartTime, chartCustom.start, chartCustom.end, activeTab]);
+
+  // C. Top Sản Phẩm
+  useEffect(() => {
+    if (activeTab !== "overview") return;
+    const fetchTopProducts = async () => {
+      setLoadingProducts(true);
+      try {
+        const dates =
+          productTime === "custom"
+            ? { from_date: productCustom.start, to_date: productCustom.end }
+            : getFilterDates(productTime);
+
+        const res = await dashboardService.getTopProducts(dates);
+        setTopProducts(Array.isArray(res?.data?.data) ? res.data.data : []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoadingProducts(false);
+      }
+    };
+    fetchTopProducts();
+  }, [productTime, productCustom.start, productCustom.end, activeTab]);
+
+  // D. Top Khách Hàng
+  useEffect(() => {
+    if (activeTab !== "overview") return;
+    const fetchTopCustomers = async () => {
+      setLoadingCustomers(true);
+      try {
+        const dates =
+          customerTime === "custom"
+            ? { from_date: customerCustom.start, to_date: customerCustom.end }
+            : getFilterDates(customerTime);
+
+        const res = await dashboardService.getTopCustomers(dates);
+        setTopCustomers(Array.isArray(res?.data?.data) ? res.data.data : []);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoadingCustomers(false);
+      }
+    };
+    fetchTopCustomers();
+  }, [customerTime, customerCustom.start, customerCustom.end, activeTab]);
+
+  // Các API khác
   const fetchDebts = async () => {
     setLoadingDebts(true);
     try {
@@ -219,7 +318,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    if (activeTab === "overview") fetchOverview();
+    if (activeTab === "overview") fetchOverviewGlobal();
     if (activeTab === "debts") fetchDebts();
     if (activeTab === "payroll") fetchPayroll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -234,6 +333,7 @@ export default function DashboardPage() {
       });
     }
   }, [filterPurchase.staffs]);
+
   // ==========================================
   // 3. HANDLERS
   // ==========================================
@@ -247,7 +347,6 @@ export default function DashboardPage() {
   };
 
   const handleOpenCollectDebt = (customer: any) => {
-    // Nếu ở chế độ nợ quá hạn, object customer là từ bảng orders, phải lấy partner ra
     const isOverdueItem = !!customer.partners;
     const actualCustomer = isOverdueItem
       ? {
@@ -275,7 +374,7 @@ export default function DashboardPage() {
       await transactionService.collectDebt({
         partnerId:
           selectedCustomer.id?.toString() || selectedCustomer.code?.toString(),
-        staffId: undefined as any, // Để Backend tự lấy từ Token
+        staffId: undefined as any,
         amount: Number(collectAmount),
         paymentMethod: collectMethod,
         note: collectNote,
@@ -290,10 +389,6 @@ export default function DashboardPage() {
       setIsSubmitting(false);
     }
   };
-
-  useEffect(() => {
-    fetchFilterPurchase();
-  }, []);
 
   const handleExportExcel = async (type: string) => {
     try {
@@ -311,7 +406,6 @@ export default function DashboardPage() {
         if (!payrollData) return toast.error("Chưa có dữ liệu lương");
         toast.loading("Đang xuất file Lợi nhuận...");
 
-        // Lấy tên nhân viên đang chọn
         const staffName =
           filterPurchase.staffs?.find(
             (s: any) => s.id === payrollFilter.staffId,
@@ -339,6 +433,11 @@ export default function DashboardPage() {
       console.error(error);
     }
   };
+
+  useEffect(() => {
+    fetchFilterPurchase();
+  }, []);
+
   // ==========================================
   // 4. RENDER
   // ==========================================
@@ -492,7 +591,7 @@ export default function DashboardPage() {
               {loadingOverview && !revenueData ? (
                 <div className="py-10 text-center text-gray-500 flex flex-col items-center gap-2">
                   <Activity className="animate-spin text-blue-500" /> Đang tải
-                  dữ liệu báo cáo...
+                  dữ liệu báo cáo chung...
                 </div>
               ) : (
                 <>
@@ -541,12 +640,61 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* 2. Main Chart */}
+                  {/* 2. Main Chart (CÓ FILTER RIÊNG) */}
                   <div className="bg-white p-5 rounded-xl shadow-sm mb-6 border border-gray-100">
-                    <h3 className="text-sm font-bold text-gray-800 mb-4">
-                      Biểu đồ doanh thu theo thời gian
-                    </h3>
-                    <div className="h-[300px] w-full">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-2">
+                      <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                        Biểu đồ doanh thu theo thời gian
+                        {loadingChart && (
+                          <Loader2
+                            size={14}
+                            className="animate-spin text-blue-500"
+                          />
+                        )}
+                      </h3>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {chartTime === "custom" && (
+                          <div className="flex items-center gap-1 border border-gray-200 rounded px-2 py-1 bg-gray-50">
+                            <input
+                              type="date"
+                              value={chartCustom.start}
+                              onChange={(e) =>
+                                setChartCustom((p) => ({
+                                  ...p,
+                                  start: e.target.value,
+                                }))
+                              }
+                              className="text-xs bg-transparent outline-none text-gray-600"
+                            />
+                            <span className="text-gray-400 text-xs">-</span>
+                            <input
+                              type="date"
+                              value={chartCustom.end}
+                              onChange={(e) =>
+                                setChartCustom((p) => ({
+                                  ...p,
+                                  end: e.target.value,
+                                }))
+                              }
+                              className="text-xs bg-transparent outline-none text-gray-600"
+                            />
+                          </div>
+                        )}
+                        <select
+                          value={chartTime}
+                          onChange={(e) => setChartTime(e.target.value)}
+                          className="text-xs border border-gray-200 rounded px-2 py-1.5 outline-none focus:border-blue-500 bg-gray-50 text-gray-700 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                        >
+                          <option value="day">Hôm nay</option>
+                          <option value="month">Tháng này</option>
+                          <option value="quarter">Quý này</option>
+                          <option value="year">Năm nay</option>
+                          <option value="custom">Tùy chỉnh</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="h-[300px] w-full relative">
                       {chartData.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart
@@ -602,13 +750,13 @@ export default function DashboardPage() {
                         </ResponsiveContainer>
                       ) : (
                         <div className="flex items-center justify-center h-full text-gray-400 text-sm">
-                          Không có dữ liệu biểu đồ
+                          {!loadingChart && "Không có dữ liệu biểu đồ"}
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* 3. BẢNG CHI TIẾT BÁN HÀNG NGÀY (Mục 1) */}
+                  {/* 3. BẢNG CHI TIẾT BÁN HÀNG NGÀY (Ăn theo dateFilter tổng) */}
                   <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-6">
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                       <h3 className="font-bold text-gray-800 flex items-center gap-2">
@@ -692,7 +840,7 @@ export default function DashboardPage() {
                                 colSpan={4}
                                 className="p-8 text-center text-gray-400 italic"
                               >
-                                Không có giao dịch bán hàng nào trong ngày này.
+                                Không có giao dịch bán hàng nào.
                               </td>
                             </tr>
                           )}
@@ -701,12 +849,62 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* 4. Top Lists */}
+                  {/* 4. Top Lists (CÓ FILTER RIÊNG) */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                      <h3 className="text-sm font-bold text-gray-800 mb-5">
-                        Top 10 Hàng bán chạy
-                      </h3>
+                    {/* TOP SẢN PHẨM */}
+                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative min-h-[300px]">
+                      <div className="flex flex-col xl:flex-row justify-between xl:items-center mb-5 gap-2">
+                        <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                          Top Hàng bán chạy
+                          {loadingProducts && (
+                            <Loader2
+                              size={14}
+                              className="animate-spin text-blue-500"
+                            />
+                          )}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {productTime === "custom" && (
+                            <div className="flex items-center gap-1 border border-gray-200 rounded px-2 py-1 bg-gray-50">
+                              <input
+                                type="date"
+                                value={productCustom.start}
+                                onChange={(e) =>
+                                  setProductCustom((p) => ({
+                                    ...p,
+                                    start: e.target.value,
+                                  }))
+                                }
+                                className="text-xs bg-transparent outline-none text-gray-600"
+                              />
+                              <span className="text-gray-400 text-xs">-</span>
+                              <input
+                                type="date"
+                                value={productCustom.end}
+                                onChange={(e) =>
+                                  setProductCustom((p) => ({
+                                    ...p,
+                                    end: e.target.value,
+                                  }))
+                                }
+                                className="text-xs bg-transparent outline-none text-gray-600"
+                              />
+                            </div>
+                          )}
+                          <select
+                            value={productTime}
+                            onChange={(e) => setProductTime(e.target.value)}
+                            className="text-xs border border-gray-200 rounded px-2 py-1.5 outline-none focus:border-blue-500 bg-gray-50 text-gray-700 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                          >
+                            <option value="day">Hôm nay</option>
+                            <option value="month">Tháng này</option>
+                            <option value="quarter">Quý này</option>
+                            <option value="year">Năm nay</option>
+                            <option value="custom">Tùy chỉnh</option>
+                          </select>
+                        </div>
+                      </div>
+
                       <div className="space-y-4">
                         {topProducts.length > 0 ? (
                           topProducts.map((prod, idx) => (
@@ -730,17 +928,69 @@ export default function DashboardPage() {
                             </div>
                           ))
                         ) : (
-                          <p className="text-xs text-center text-gray-400 py-4">
-                            Chưa có dữ liệu
-                          </p>
+                          <div className="absolute inset-0 top-12 flex items-center justify-center">
+                            <p className="text-xs text-gray-400">
+                              {!loadingProducts && "Chưa có dữ liệu sản phẩm"}
+                            </p>
+                          </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                      <h3 className="text-sm font-bold text-gray-800 mb-5">
-                        Top Khách hàng
-                      </h3>
+                    {/* TOP KHÁCH HÀNG */}
+                    <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 relative min-h-[300px]">
+                      <div className="flex flex-col xl:flex-row justify-between xl:items-center mb-5 gap-2">
+                        <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                          Top Khách hàng
+                          {loadingCustomers && (
+                            <Loader2
+                              size={14}
+                              className="animate-spin text-green-500"
+                            />
+                          )}
+                        </h3>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {customerTime === "custom" && (
+                            <div className="flex items-center gap-1 border border-gray-200 rounded px-2 py-1 bg-gray-50">
+                              <input
+                                type="date"
+                                value={customerCustom.start}
+                                onChange={(e) =>
+                                  setCustomerCustom((p) => ({
+                                    ...p,
+                                    start: e.target.value,
+                                  }))
+                                }
+                                className="text-xs bg-transparent outline-none text-gray-600"
+                              />
+                              <span className="text-gray-400 text-xs">-</span>
+                              <input
+                                type="date"
+                                value={customerCustom.end}
+                                onChange={(e) =>
+                                  setCustomerCustom((p) => ({
+                                    ...p,
+                                    end: e.target.value,
+                                  }))
+                                }
+                                className="text-xs bg-transparent outline-none text-gray-600"
+                              />
+                            </div>
+                          )}
+                          <select
+                            value={customerTime}
+                            onChange={(e) => setCustomerTime(e.target.value)}
+                            className="text-xs border border-gray-200 rounded px-2 py-1.5 outline-none focus:border-green-500 bg-gray-50 text-gray-700 font-medium cursor-pointer hover:bg-gray-100 transition-colors"
+                          >
+                            <option value="day">Hôm nay</option>
+                            <option value="month">Tháng này</option>
+                            <option value="quarter">Quý này</option>
+                            <option value="year">Năm nay</option>
+                            <option value="custom">Tùy chỉnh</option>
+                          </select>
+                        </div>
+                      </div>
+
                       <div className="space-y-4">
                         {topCustomers.length > 0 ? (
                           topCustomers.map((cus, idx) => (
@@ -764,9 +1014,12 @@ export default function DashboardPage() {
                             </div>
                           ))
                         ) : (
-                          <p className="text-xs text-center text-gray-400 py-4">
-                            Chưa có dữ liệu
-                          </p>
+                          <div className="absolute inset-0 top-12 flex items-center justify-center">
+                            <p className="text-xs text-gray-400">
+                              {!loadingCustomers &&
+                                "Chưa có dữ liệu khách hàng"}
+                            </p>
+                          </div>
                         )}
                       </div>
                     </div>

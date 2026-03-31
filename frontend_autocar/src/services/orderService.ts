@@ -17,6 +17,24 @@ export const orderService = {
   create: async (payload: any) => {
     // Gọi API: POST /orders
     const response = await axiosClient.post("/orders", payload);
+    return response?.data?.data;
+  },
+  update: async (id: string | number, data: any) => {
+    const response = await axiosClient.put(`/orders/${id}`, data);
+    return response?.data?.data;
+  },
+
+  /**
+   * Xóa một đơn hàng
+   * Lưu ý: Backend chỉ cho phép xóa khi đơn hàng CHƯA hoàn thành.
+   */
+  remove: async (id: string | number) => {
+    const response = await axiosClient.delete(`/orders/${id}`);
+    return response.data;
+  },
+  removeMany: async (ids: string[]) => {
+    // Backend yêu cầu body có dạng { ids: ['1', '2'] }
+    const response = await axiosClient.post(`/orders/delete-many`, { ids });
     return response.data;
   },
 

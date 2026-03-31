@@ -25,13 +25,17 @@ export const supplierService = {
 
   // 3. Xóa nhiều nhà cung cấp (Nếu cần)
   deleteMany: async (ids: string[]) => {
-    const response = await axiosClient.delete("/partners/supplier/multiple", {
+    const response = await axiosClient.delete("/partners/bulk", {
       data: { ids },
     });
     return response.data;
   },
   create: async (data: any) => {
     const response = await axiosClient.post("/partners", data);
+    return response.data;
+  },
+  createSupplier: async (data: any) => {
+    const response = await axiosClient.post("/partners/supplier", data);
     return response.data;
   },
   exportData: async (columns: string[]) => {

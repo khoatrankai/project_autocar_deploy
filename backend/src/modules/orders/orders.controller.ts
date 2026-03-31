@@ -10,11 +10,13 @@ import {
   BadRequestException,
   ParseIntPipe,
   DefaultValuePipe,
+  Put,
+  Delete,
   // Req, // Dùng cái này nếu có Auth thật
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiOperation, ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { SupabaseGuard } from 'src/auth/supabase.guard';
 
 // Giả sử bạn có AuthGuard
@@ -57,6 +59,50 @@ export class OrdersController {
     // Nếu trong DTO có gửi staff_id (Admin tạo hộ), Service đã ưu tiên lấy staff_id trong DTO
 
     return this.ordersService.create(createOrderDto, currentUserId);
+  }
+
+  @Put(':id')
+  @ApiBearerAuth() // <--- Hiện ổ khóa trên Swagger
+  @UseGuards(SupabaseGuard) // <--- Kích hoạt bảo vệ
+  @ApiOperation({
+    summary: 'Cập nhật đơn hàng (Chỉ áp dụng cho đơn chưa Hoàn thành)',
+  })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateOrderDto>,
+    @Req() req: any,
+  ) {
+    console.log(req.user);
+    const userId = req.user.id;
+    console.log(id, dto, userId);
+    return await this.ordersService.update(id, dto, userId);
+  }
+
+  @Delete(':id')
+  @ApiOperation({
+    summary: 'Xóa đơn hàng (Chỉ áp dụng cho đơn chưa Hoàn thành)',
+  })
+  async remove(@Param('id') id: string) {
+    return await this.ordersService.remove(id);
+  }
+
+  @Post('delete-many')
+  @ApiOperation({
+    summary: 'Xóa nhiều đơn hàng cùng lúc (Chỉ xóa đơn chưa hoàn thành)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' }, example: ['1', '2'] },
+      },
+    },
+  })
+  async removeMany(@Body('ids') ids: string[]) {
+    if (!ids || ids.length === 0) {
+      throw new BadRequestException('Danh sách ID không được để trống');
+    }
+    return await this.ordersService.removeMany(ids);
   }
 
   // -------------------------------------------------------

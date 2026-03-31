@@ -39,4 +39,32 @@ export const stockTransferService = {
   reject: (id: string | number, reason: string) => {
     return axiosClient.post(`/stock-transfers/${id}/reject`, { reason });
   },
+
+  update: async (id: number | string, data: any, userId?: string) => {
+    // Nếu có userId thì nối vào query URL
+    const url = userId
+      ? `/stock-transfers/${id}?userId=${userId}`
+      : `/stock-transfers/${id}`;
+
+    const response = await axiosClient.put(url, data);
+    return response.data;
+  },
+
+  /**
+   * Xóa một phiếu chuyển (Hoàn lại tồn kho nếu đang pending)
+   */
+  remove: async (id: number | string) => {
+    const response = await axiosClient.delete(`/stock-transfers/${id}`);
+    return response.data;
+  },
+
+  /**
+   * Xóa nhiều phiếu chuyển cùng lúc
+   */
+  removeMany: async (ids: (number | string)[]) => {
+    const response = await axiosClient.post(`/stock-transfers/delete-many`, {
+      ids,
+    });
+    return response.data;
+  },
 };

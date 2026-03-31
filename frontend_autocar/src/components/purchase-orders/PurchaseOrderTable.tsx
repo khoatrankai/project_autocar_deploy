@@ -19,6 +19,7 @@ import { usePurchaseOrderStore } from "../../store/usePurchaseOrderStore";
 import { purchaseOrderService } from "../../services/purchaseOrderService";
 import CreatePurchaseOrderModal from "./CreatePurchaseOrderModal";
 import ExportPurchaseOrderModal from "./modals/ExportPurchaseOrderModal";
+import UpdatePurchaseOrderModal from "./modals/UpdatePurchaseOrderModal";
 
 const COLUMN_CONFIG = [
   { key: "code", label: "Mã nhập hàng", default: true },
@@ -38,7 +39,7 @@ export default function PurchaseOrderTable() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [localSearch, setLocalSearch] = useState(filters.search || "");
-
+  const [updateId, setUpdateId] = useState<string | null>(null);
   // --- STATE SELECTION (CHỌN DÒNG) ---
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -386,7 +387,10 @@ export default function PurchaseOrderTable() {
                       </td>
 
                       {visibleColumns.code && (
-                        <td className="p-4 font-medium text-blue-600 cursor-pointer hover:underline">
+                        <td
+                          className="p-4 font-medium text-blue-600 cursor-pointer hover:underline"
+                          onClick={() => setUpdateId(order.id)}
+                        >
                           {order.code}
                         </td>
                       )}
@@ -474,6 +478,17 @@ export default function PurchaseOrderTable() {
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
       />
+      {updateId && (
+        <UpdatePurchaseOrderModal
+          isOpen={!!updateId}
+          orderId={updateId}
+          onClose={() => setUpdateId(null)}
+          onSuccess={() => {
+            setUpdateId(null);
+            fetchOrders();
+          }}
+        />
+      )}
     </>
   );
 }

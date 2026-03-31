@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Delete,
+  Req,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -17,7 +18,7 @@ import {
   FilterProductDto,
 } from './dto/filter-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiBody } from '@nestjs/swagger';
 
 // Auth Guards
 import { RolesGuard } from 'src/auth/guards/roles.guard';
@@ -88,10 +89,12 @@ export class ProductsController {
   }
 
   @Delete('multiple')
+  @UseGuards(SupabaseGuard)
   @Roles(UserRole.ADMIN, UserRole.WAREHOUSE) // Chỉ Admin/Kho được xóa
   @ApiOperation({ summary: 'Xóa nhiều sản phẩm cùng lúc' })
-  removeMultiple(@Body() dto: DeleteManyDto) {
-    return this.service.removeMultiple(dto.ids);
+  removeMultiple(@Body() dto: DeleteManyDto, @Req() req: any) {
+    const userId = req.user?.id || '1';
+    return this.service.removeMultiple(dto.ids, userId);
   }
 
   @Get('pos-search')
@@ -112,5 +115,55 @@ export class ProductsController {
   async deleteBrand(@Param('name') name: string) {
     const result = await this.service.deleteBrand(name);
     return { success: true, ...result };
+  }
+
+  @Post('clear-all')
+  @UseGuards(SupabaseGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Xóa sạch danh sách sản phẩm (Lưu backup 30 ngày)' })
+  async clearAll(@Body('reason') reason: string, @Req() req: any) {
+    // Lấy userId từ Guard hoặc DTO như đã xử lý ở các phần trước
+    const userId = req.user?.id || '1';
+    return await this.service.clearAllProductsWithBackup(userId, reason);
+  }
+
+  @Post('backup-manual')
+  @Roles(UserRole.ADMIN)
+  @ApiOperation({ summary: 'Sao lưu thủ công các sản phẩm đã chọn' })
+  async manualBackup(
+    @Body() body: { ids: string[]; reason: string },
+    @Req() req: any,
+  ) {
+    const userId = req.user?.id || '1';
+    return await this.service.backupProducts(body.ids, userId, body.reason);
+  }
+
+  @Post('clear-all')
+  @Roles(UserRole.ADMIN) // Chỉ cho phép Admin thực hiện
+  @ApiOperation({
+    summary:
+      'Xóa toàn bộ sản phẩm (Tạo bản sao lưu có thể khôi phục trong 30 ngày)',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        reason: {
+          type: 'string',
+          description: 'Lý do xóa toàn bộ sản phẩm',
+          example: 'Cập nhật lại toàn bộ danh mục hàng hóa tháng 4',
+        },
+      },
+      required: ['reason'],
+    },
+  })
+  async clearAllProducts(@Body('reason') reason: string, @Req() req: any) {
+    // Lấy ID người dùng từ request (nếu chưa có Auth guard, để mặc định là "1")
+    const userId = req.user?.id || '1';
+
+    // Đảm bảo có lý do
+    const deleteReason = reason || 'Người dùng không nhập lý do';
+
+    return await this.service.clearAllProductsWithBackup(userId, deleteReason);
   }
 }

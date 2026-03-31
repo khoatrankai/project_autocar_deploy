@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'src/shared/prisma/prisma.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { FilterPurchaseOrderDto } from './dto/filter-purchase-order.dto';
@@ -8,10 +12,44 @@ import { Prisma } from '@prisma/client';
 export class PurchaseOrdersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async generatePurchaseOrderCode(
+    tx: any,
+    prefix: string,
+  ): Promise<string> {
+    const currentYear = new Date().getFullYear();
+    const prefixWithVer = `${prefix}00`; // Phiếu nhập mới luôn bắt đầu bằng version 00 (VD: PN00)
+
+    // Tìm mã phiếu nhập lớn nhất của năm hiện tại
+    const lastOrder = await tx.purchase_orders.findFirst({
+      where: {
+        code: {
+          startsWith: prefixWithVer,
+          endsWith: currentYear.toString(),
+        },
+      },
+      orderBy: { code: 'desc' }, // Lấy mã cao nhất
+    });
+
+    let nextStt = 1;
+    if (lastOrder) {
+      // Tách STT: PN00[22]2026 -> Bỏ 'PN00' và '2026'
+      const lastCode = lastOrder.code;
+      const sttPart = lastCode
+        .replace(prefixWithVer, '')
+        .replace(currentYear.toString(), '');
+      nextStt = (parseInt(sttPart) || 0) + 1;
+    }
+
+    // Trả về format: PN00 + STT + 2026
+    return `${prefixWithVer}${nextStt}${currentYear}`;
+  }
   // ====================================================================
   // TẠO PHIẾU NHẬP HÀNG (PO)
   // ====================================================================
-  async create(data: CreatePurchaseOrderDto, staffId: string) {
+  async create(
+    data: any /* thay bằng CreatePurchaseOrderDto */,
+    staffId: string,
+  ) {
     const {
       items,
       supplier_id,
@@ -28,7 +66,7 @@ export class PurchaseOrdersService {
       throw new BadRequestException('Phiếu nhập phải có ít nhất 1 sản phẩm');
     }
 
-    // 1. Tính toán tổng tiền
+    // Tính toán tổng tiền
     let total_amount = 0;
     items.forEach((item) => {
       total_amount += item.quantity * item.import_price;
@@ -36,40 +74,58 @@ export class PurchaseOrdersService {
 
     const final_amount = total_amount - discount;
 
-    // 2. Tạo Mã phiếu nếu chưa có (PN + Timestamp)
-    const orderCode = code || `PN${Date.now()}`;
+    // Bọc toàn bộ trong Transaction để khóa row, tránh tình trạng 2 nhân viên
+    // cùng tạo phiếu một lúc dẫn đến trùng mã Code
+    return await this.prisma.$transaction(async (tx) => {
+      // Lấy mã từ request HOẶC tự động sinh mã mới
+      const orderCode =
+        code || (await this.generatePurchaseOrderCode(tx, 'PN'));
 
-    // 3. Insert vào Database
-    // Lưu ý: Tên trường quan hệ phải khớp với schema.prisma (purchase_order_items)
-    const result = await this.prisma.purchase_orders.create({
-      data: {
-        code: orderCode,
-        supplier_id: supplier_id,
-        warehouse_id: warehouse_id,
-        staff_id: staff_id || staffId,
-        total_amount: total_amount,
-        discount: discount,
-        final_amount: final_amount,
-        paid_amount: paid_amount,
-        note: note,
-        status: status || 'completed', // 'completed' để trigger chạy cập nhật kho/công nợ
+      const result = await tx.purchase_orders.create({
+        data: {
+          code: orderCode,
+          supplier_id: supplier_id ? BigInt(supplier_id) : undefined,
+          warehouse_id: warehouse_id ? BigInt(warehouse_id) : undefined,
+          staff_id: staff_id || staffId, // Nếu client không gửi thì lấy staffId từ Token
+          total_amount: total_amount,
+          discount: discount,
+          final_amount: final_amount,
+          paid_amount: paid_amount,
+          note: note,
+          status: status || 'completed', // Mặc định là hoàn thành
 
-        // SỬA: Dùng 'purchase_order_items' thay vì 'items'
-        purchase_order_items: {
-          create: items.map((item) => ({
-            product_id: item.product_id,
-            quantity: item.quantity,
-            import_price: item.import_price,
-          })),
+          purchase_order_items: {
+            create: items.map((item) => ({
+              product_id: BigInt(item.product_id),
+              quantity: item.quantity,
+              import_price: item.import_price,
+            })),
+          },
         },
-      },
-      include: {
-        // SỬA: Include theo tên quan hệ trong schema
-        purchase_order_items: true,
-      },
-    });
+        include: {
+          purchase_order_items: true,
+        },
+      });
 
-    return result;
+      // Format lại BigInt và Decimal trước khi trả về Frontend
+      return {
+        ...result,
+        id: result.id.toString(),
+        supplier_id: result.supplier_id?.toString(),
+        warehouse_id: result.warehouse_id?.toString(),
+        total_amount: Number(result.total_amount),
+        final_amount: Number(result.final_amount),
+        discount: Number(result.discount),
+        paid_amount: Number(result.paid_amount),
+        purchase_order_items: result.purchase_order_items.map((item) => ({
+          ...item,
+          id: item.id.toString(),
+          product_id: item.product_id,
+          purchase_order_id: item.purchase_order_id,
+          import_price: Number(item.import_price),
+        })),
+      };
+    });
   }
 
   // ====================================================================
@@ -230,6 +286,166 @@ export class PurchaseOrdersService {
         total_pages: Math.ceil(total / limit),
       },
     };
+  }
+
+  async findOne(id: number) {
+    const orderId = BigInt(id);
+
+    const order = await this.prisma.purchase_orders.findUnique({
+      where: { id: orderId },
+      include: {
+        // Lấy chi tiết các mặt hàng trong phiếu
+        purchase_order_items: {
+          include: {
+            products: {
+              select: {
+                sku: true,
+                name: true,
+                unit: true,
+                image_url: true,
+                cost_price: true,
+              },
+            },
+          },
+        },
+        // Lấy thông tin nhà cung cấp (tên quan hệ trong schema là partners)
+        partners: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            phone: true,
+          },
+        },
+        // Lấy thông tin kho
+        warehouses: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        // Lấy thông tin nhân viên tạo
+        profiles: {
+          select: {
+            id: true,
+            full_name: true,
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Không tìm thấy phiếu nhập hàng có ID ${id}`);
+    }
+
+    // Chuyển đổi BigInt và Decimal sang kiểu dữ liệu an toàn cho JSON
+    return JSON.parse(
+      JSON.stringify(order, (key, value) =>
+        typeof value === 'bigint' ? value.toString() : value,
+      ),
+    );
+  }
+
+  // ====================================================================
+  // CẬP NHẬT PHIẾU NHẬP (PO)
+  // ====================================================================
+  async update(id: number, data: any, staffId: string) {
+    const {
+      items,
+      supplier_id,
+      warehouse_id,
+      status,
+      discount,
+      paid_amount,
+      note,
+    } = data;
+
+    const orderId = BigInt(id);
+
+    return await this.prisma.$transaction(async (tx) => {
+      // 1. Kiểm tra phiếu có tồn tại không
+      const currentOrder = await tx.purchase_orders.findUnique({
+        where: { id: orderId },
+        include: { purchase_order_items: true },
+      });
+
+      if (!currentOrder) {
+        throw new BadRequestException('Không tìm thấy phiếu nhập hàng');
+      }
+
+      // CHẶN SỬA PHIẾU ĐÃ HOÀN THÀNH HOẶC ĐÃ HỦY
+      if (currentOrder.status === 'completed') {
+        throw new BadRequestException(
+          'Phiếu đã nhập kho thành công, không thể chỉnh sửa thông tin.',
+        );
+      }
+      if (currentOrder.status === 'cancelled') {
+        throw new BadRequestException('Phiếu đã bị hủy, không thể chỉnh sửa.');
+      }
+
+      // 2. Tính toán lại tổng tiền nếu có danh sách items mới (Dành cho phiếu 'draft')
+      let total_amount = Number(currentOrder.total_amount);
+
+      if (items && items.length > 0) {
+        total_amount = items.reduce(
+          (sum, item) => sum + item.quantity * item.import_price,
+          0,
+        );
+
+        // Xóa sạch items cũ và tạo lại (Chiến thuật thay thế 1-1)
+        await tx.purchase_order_items.deleteMany({
+          where: { purchase_order_id: orderId },
+        });
+
+        await tx.purchase_order_items.createMany({
+          data: items.map((item) => ({
+            purchase_order_id: orderId,
+            product_id: BigInt(item.product_id),
+            quantity: item.quantity,
+            import_price: item.import_price,
+          })),
+        });
+      }
+
+      const final_discount =
+        discount !== undefined ? discount : Number(currentOrder.discount);
+      const final_amount = total_amount - final_discount;
+
+      // 3. Cập nhật Header của phiếu
+      const updatedOrder = await tx.purchase_orders.update({
+        where: { id: orderId },
+        data: {
+          supplier_id: supplier_id ? BigInt(supplier_id) : undefined,
+          warehouse_id: warehouse_id ? BigInt(warehouse_id) : undefined,
+          status: status, // Cho phép chuyển từ 'draft' sang 'completed' tại đây
+          note: note,
+          total_amount: total_amount,
+          discount: final_discount,
+          final_amount: final_amount,
+          paid_amount: paid_amount !== undefined ? paid_amount : undefined,
+        },
+        include: { purchase_order_items: true },
+      });
+
+      // Format lại BigInt và Decimal trước khi trả về Frontend
+      return {
+        ...updatedOrder,
+        id: updatedOrder.id.toString(),
+        supplier_id: updatedOrder.supplier_id?.toString(),
+        warehouse_id: updatedOrder.warehouse_id?.toString(),
+        total_amount: Number(updatedOrder.total_amount),
+        final_amount: Number(updatedOrder.final_amount),
+        discount: Number(updatedOrder.discount),
+        paid_amount: Number(updatedOrder.paid_amount),
+        purchase_order_items: updatedOrder.purchase_order_items.map((item) => ({
+          ...item,
+          id: item.id.toString(),
+          product_id: item.product_id,
+          purchase_order_id: item.purchase_order_id,
+          import_price: Number(item.import_price),
+        })),
+      };
+    });
   }
 
   // ====================================================================

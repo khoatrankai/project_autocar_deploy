@@ -34,6 +34,17 @@ export const purchaseOrderService = {
     );
     return response.data;
   },
+  /** Lấy thông tin chi tiết 1 phiếu nhập */
+  getOne: async (id: string | number) => {
+    const response = await axiosClient.get(`/purchase-orders/${id}`);
+    return response.data;
+  },
+
+  /** Cập nhật phiếu nhập hàng */
+  update: async (id: string | number, data: any) => {
+    const response = await axiosClient.put(`/purchase-orders/${id}`, data);
+    return response.data;
+  },
 
   // 4. Export Excel
   exportOrders: async (columns: string[]) => {

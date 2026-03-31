@@ -65,7 +65,7 @@ export default function CreateSupplierModal({
     setIsLoading(true);
     try {
       // Gọi API tạo mới
-      await supplierService.create(formData);
+      await supplierService.createSupplier(formData);
 
       toast.success("Thêm nhà cung cấp thành công!");
       if (onSuccess) onSuccess();

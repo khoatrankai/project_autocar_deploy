@@ -11,35 +11,83 @@ import { FilterReturnDto } from './dto/filter-return.dto';
 export class ReturnsService {
   constructor(private prisma: PrismaService) {}
 
-  async create(dto: CreateReturnDto) {
+  // ====================================================================
+  // HÀM TẠO MÃ TỰ ĐỘNG (Định dạng: TH00 + STT 3 số + Năm)
+  // ====================================================================
+  private async generateReturnCode(tx: any, prefix: string): Promise<string> {
+    const currentYear = new Date().getFullYear();
+    const prefixWithVer = `${prefix}00`; // Ví dụ: 'TH00' (Trả Hàng)
+
+    const lastReturn = await tx.returns.findFirst({
+      where: {
+        code: {
+          startsWith: prefixWithVer,
+          endsWith: currentYear.toString(),
+        },
+      },
+      orderBy: { code: 'desc' },
+    });
+
+    let nextStt = 1;
+    if (lastReturn) {
+      const lastCode = lastReturn.code;
+      const sttString = lastCode.slice(prefixWithVer.length, -4);
+      nextStt = (parseInt(sttString) || 0) + 1;
+    }
+
+    const paddedStt = nextStt.toString().padStart(3, '0');
+    return `${prefixWithVer}${paddedStt}${currentYear}`; // VD: TH000012026
+  }
+
+  async create(dto: any) {
     return this.prisma.$transaction(async (tx) => {
-      // 1. Tính tổng tiền hoàn
+      // 1. Sinh mã tự động
+      const returnCode = dto.code || (await this.generateReturnCode(tx, 'TH'));
+
+      // 2. Tìm ID Kho nhận hàng trả về (Ưu tiên truyền từ UI, nếu không thì lấy từ đơn gốc)
+      let warehouseId: bigint | undefined;
+      if (dto.warehouse_id) {
+        warehouseId = BigInt(dto.warehouse_id);
+      } else if (dto.order_id) {
+        const originalOrder = await tx.orders.findUnique({
+          where: { id: BigInt(dto.order_id) },
+        });
+        if (originalOrder && originalOrder.warehouse_id) {
+          warehouseId = originalOrder.warehouse_id;
+        }
+      }
+
+      // 3. Tính tổng tiền hoàn
       const totalRefund = dto.items.reduce(
         (sum, item) => sum + item.refund_price * item.quantity,
         0,
       );
 
-      // 2. Tạo Header
+      // 4. Tạo Header Phiếu trả
       const returnOrder = await tx.returns.create({
         data: {
-          code: dto.code,
+          code: returnCode,
           order_id: dto.order_id ? BigInt(dto.order_id) : undefined,
           partner_id: BigInt(dto.partner_id),
           total_refund: totalRefund,
           reason: dto.reason,
-          status: 'completed',
+          status: dto.status || 'completed', // Thường tạo xong là hoàn thành luôn
         },
       });
 
-      // 3. Tạo Items
+      // 5. Tạo Items và CỘNG TỒN KHO bằng code (Thay vì dùng Trigger)
       for (const item of dto.items) {
-        // Lấy thông tin SP để lưu snapshot tên/sku
         const product = await tx.products.findUnique({
           where: { id: BigInt(item.product_id) },
         });
-        if (!product)
-          throw new BadRequestException(`Product ${item.product_id} not found`);
 
+        if (!product) {
+          throw new BadRequestException(
+            `Sản phẩm ID ${item.product_id} không tồn tại`,
+          );
+        }
+
+        // Tạo chi tiết trả hàng
         await tx.return_items.create({
           data: {
             return_id: returnOrder.id,
@@ -51,19 +99,43 @@ export class ReturnsService {
           },
         });
 
-        // Lưu ý: Trigger handle_return_inventory trong SQL sẽ tự động chạy để cộng kho
-        // Nếu trigger SQL chưa chuẩn, bạn cần cộng kho thủ công ở đây:
-        // await tx.inventory.update(...)
+        // NẾU PHIẾU HOÀN THÀNH -> CỘNG LẠI TỒN KHO
+        if (returnOrder.status === 'completed' && warehouseId) {
+          await tx.inventory.upsert({
+            where: {
+              product_id_warehouse_id: {
+                product_id: BigInt(item.product_id),
+                warehouse_id: warehouseId,
+              },
+            },
+            update: { quantity: { increment: item.quantity } },
+            create: {
+              product_id: BigInt(item.product_id),
+              warehouse_id: warehouseId,
+              quantity: item.quantity,
+            },
+          });
+
+          // (Tùy chọn) Bạn có thể ghi thêm log thẻ kho (inventory_logs) ở đây
+        }
       }
 
-      // 4. (Optional) Cập nhật trạng thái đơn hàng gốc thành 'returned'
-      dto.order_id &&
-        (await tx.orders.update({
+      // 6. Cập nhật trạng thái đơn hàng gốc thành 'returned'
+      if (dto.order_id && returnOrder.status === 'completed') {
+        await tx.orders.update({
           where: { id: BigInt(dto.order_id) },
           data: { status: 'returned' },
-        }));
+        });
+      }
 
-      return returnOrder;
+      // 7. Format BigInt sang chuỗi trước khi trả về
+      return {
+        ...returnOrder,
+        id: returnOrder.id.toString(),
+        order_id: returnOrder.order_id?.toString(),
+        partner_id: returnOrder.partner_id?.toString(),
+        total_refund: Number(returnOrder.total_refund),
+      };
     });
   }
 
@@ -242,36 +314,95 @@ export class ReturnsService {
 
   // 2. UPDATE: Cập nhật phiếu trả (Thường chỉ cho sửa khi chưa Hoàn thành)
   async update(id: string, data: any) {
-    // Kiểm tra tồn tại
-    const exists = await this.prisma.returns.findUnique({
-      where: { id: BigInt(id) },
+    const returnId = BigInt(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Kiểm tra tồn tại
+      const currentReturn = await tx.returns.findUnique({
+        where: { id: returnId },
+        include: { return_items: true }, // Include để lấy danh sách cộng kho
+      });
+
+      if (!currentReturn)
+        throw new NotFoundException('Phiếu trả không tồn tại');
+
+      // Chặn sửa phiếu đã xong
+      if (
+        currentReturn.status === 'completed' ||
+        currentReturn.status === 'cancelled'
+      ) {
+        throw new BadRequestException(
+          'Không thể sửa phiếu đã hoàn thành hoặc đã hủy',
+        );
+      }
+
+      const { reason, status, warehouse_id } = data;
+
+      // 2. Cập nhật Header
+      const updatedReturn = await tx.returns.update({
+        where: { id: returnId },
+        data: {
+          reason: reason,
+          status: status,
+        },
+      });
+
+      // 3. XỬ LÝ CHUYỂN TRẠNG THÁI SANG COMPLETED (CỘNG KHO)
+      if (status === 'completed' && currentReturn.status !== 'completed') {
+        // Xác định kho nhận (Ưu tiên DTO truyền lên, sau đó lấy từ đơn gốc)
+        let targetWarehouseId = warehouse_id ? BigInt(warehouse_id) : undefined;
+
+        if (!targetWarehouseId && currentReturn.order_id) {
+          const originalOrder = await tx.orders.findUnique({
+            where: { id: currentReturn.order_id },
+          });
+          targetWarehouseId = originalOrder?.warehouse_id || undefined;
+        }
+
+        if (!targetWarehouseId) {
+          throw new BadRequestException(
+            'Không xác định được kho nhận để hoàn trả tồn kho',
+          );
+        }
+
+        // Chạy vòng lặp cộng tồn kho cho từng item
+        for (const item of currentReturn.return_items) {
+          if (item.product_id) {
+            await tx.inventory.upsert({
+              where: {
+                product_id_warehouse_id: {
+                  product_id: item.product_id,
+                  warehouse_id: targetWarehouseId,
+                },
+              },
+              update: { quantity: { increment: Number(item.quantity) || 0 } },
+              create: {
+                product_id: item.product_id,
+                warehouse_id: targetWarehouseId,
+                quantity: Number(item.quantity) || 0,
+              },
+            });
+          }
+        }
+
+        // Cập nhật trạng thái đơn hàng gốc
+        if (currentReturn.order_id) {
+          await tx.orders.update({
+            where: { id: currentReturn.order_id },
+            data: { status: 'returned' },
+          });
+        }
+      }
+
+      // 4. Format chuẩn TypeScript trả về
+      return {
+        ...updatedReturn,
+        id: updatedReturn.id.toString(),
+        order_id: updatedReturn.order_id?.toString(),
+        partner_id: updatedReturn.partner_id?.toString(),
+        total_refund: Number(updatedReturn.total_refund),
+      };
     });
-    if (!exists) throw new NotFoundException('Phiếu trả không tồn tại');
-
-    // Chỉ cho phép sửa nếu trạng thái là 'pending' (hoặc logic tùy bạn)
-    if (exists.status === 'completed' || exists.status === 'cancelled') {
-      // throw new BadRequestException('Không thể sửa phiếu đã hoàn thành hoặc đã hủy');
-      // Tạm thời comment để bạn test, tùy nghiệp vụ
-    }
-
-    // Tách các trường update (ví dụ chỉ update ghi chú, hoặc status)
-    const { reason, status } = data;
-
-    const updated = await this.prisma.returns.update({
-      where: { id: BigInt(id) },
-      data: {
-        reason,
-        status,
-        // Nếu muốn update items thì logic phức tạp hơn (xóa cũ thêm mới),
-        // ở đây tạm thời update thông tin cơ bản
-      },
-    });
-
-    return JSON.parse(
-      JSON.stringify(updated, (key, value) =>
-        typeof value === 'bigint' ? value.toString() : value,
-      ),
-    );
   }
 
   // 3. DELETE: Xóa 1 phiếu (Thường là xóa mềm hoặc xóa hẳn nếu là phiếu nháp)

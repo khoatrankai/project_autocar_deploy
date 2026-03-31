@@ -113,7 +113,10 @@ export const productService = {
     formData.append("file", file);
 
     // 2. Gọi API (Axios tự động set Content-Type: multipart/form-data khi nhận FormData)
-    const response = await axiosClient.post("/import/products", formData);
+    const response = await axiosClient.post(
+      "/import/products-current",
+      formData,
+    );
     return response.data;
   },
 
@@ -164,6 +167,28 @@ export const productService = {
     const response = await axiosClient.delete(
       `/products/brands/${encodeURIComponent(brandName)}`,
     );
+    return response.data;
+  },
+  checkImportFile: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    // Trình duyệt sẽ tự động set headers "multipart/form-data" nhờ cấu hình axios trước đó
+    const response = await axiosClient.post("/import/check-product", formData);
+    return response.data;
+  },
+
+  /**
+   * BƯỚC 2: Gửi danh sách dữ liệu hợp lệ (pendingList) để lưu vào Database
+   */
+  confirmImport: async (pendingListData: any[]) => {
+    const response = await axiosClient.post("/import/confirm-import", {
+      data: pendingListData, // Backend yêu cầu body có dạng { data: any[] }
+    });
+    return response.data;
+  },
+  clearAllProducts: async (reason: string) => {
+    const response = await axiosClient.post("/products/clear-all", { reason });
     return response.data;
   },
 };

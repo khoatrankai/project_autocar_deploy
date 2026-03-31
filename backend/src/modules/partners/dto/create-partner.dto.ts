@@ -72,6 +72,16 @@ export class CreatePartnerDto {
   @IsEnum(PartnerStatus)
   status?: PartnerStatus = PartnerStatus.ACTIVE;
 
+  @ApiProperty({
+    example: 0,
+    required: false,
+    description: 'Nợ hiện tại (Số dư đầu kỳ)',
+  })
+  @IsOptional()
+  @IsNumber()
+  // @Min(0) // Tùy chọn: Bỏ Min nếu bạn cho phép nhập số âm (khách trả trước)
+  current_debt?: number = 0;
+
   @ApiProperty({ example: 20000000, required: false, minimum: 0 })
   @IsOptional()
   @IsNumber()
@@ -90,6 +100,7 @@ export class QuickCreatePartnerDto extends PickType(CreatePartnerDto, [
   'name',
   'phone',
   'address',
+  'current_debt',
 ] as const) {
   // Ghi đè type nếu muốn mặc định là Customer trong Swagger, dù Service sẽ hardcode
   @ApiProperty({ enum: PartnerType, default: PartnerType.CUSTOMER })
