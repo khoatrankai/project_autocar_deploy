@@ -69,7 +69,8 @@ export default function MainLayout() {
   const { user, logout } = useAuthStore();
 
   // 1. Lấy danh sách kho từ store
-  const { filterOptions, fetchFilterOptions } = useProductStore();
+  const { filterOptions, fetchFilterOptions, fetchProducts } =
+    useProductStore();
   const { setWarehouseManager, warehouse_manager } = useManagerStore();
 
   // 2. State lưu chi nhánh đang chọn
@@ -81,7 +82,6 @@ export default function MainLayout() {
     const locations = filterOptions?.locations || [];
     // Thử lấy từ LocalStorage
     const savedBranch = localStorage.getItem("selected_branch") as any;
-    console.log("vao ch", savedBranch);
     if (savedBranch) {
       try {
         const parsed = JSON.parse(savedBranch);
@@ -100,9 +100,7 @@ export default function MainLayout() {
       const defaultBranch = locations[0];
       setSelectedBranch(defaultBranch);
       localStorage.setItem("selected_branch", JSON.stringify(defaultBranch));
-      console.log("v1");
       setWarehouseManager(defaultBranch?.id);
-      console.log("oke 1");
     }
   }, [filterOptions?.locations]); // Chạy lại khi danh sách kho thay đổi
 
@@ -118,7 +116,7 @@ export default function MainLayout() {
   const handleSelectBranch = (branch: any) => {
     setSelectedBranch(branch);
     localStorage.setItem("selected_branch", JSON.stringify(branch));
-    console.log("v3");
+    fetchProducts();
     setWarehouseManager(branch?.id);
     // Có thể thêm window.location.reload() nếu cần refresh dữ liệu toàn trang theo kho
   };
