@@ -249,14 +249,14 @@ export default function ReturnTable() {
             >
               <Plus size={16} /> <span>Nhận hàng trả</span>
             </button>
-            <button className="flex items-center gap-2 px-3 py-2 bg-white text-gray-700 border rounded hover:bg-gray-50 text-sm">
+            {/* <button className="flex items-center gap-2 px-3 py-2 bg-white text-gray-700 border rounded hover:bg-gray-50 text-sm">
               <Upload size={16} />
               <span className="hidden sm:inline">Import</span>
             </button>
             <button className="flex items-center gap-2 px-3 py-2 bg-white text-gray-700 border rounded hover:bg-gray-50 text-sm">
               <FileDown size={16} />
               <span className="hidden sm:inline">Xuất file</span>
-            </button>
+            </button> */}
 
             <div className="relative" ref={selectorRef}>
               <button
