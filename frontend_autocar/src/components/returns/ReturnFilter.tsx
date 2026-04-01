@@ -20,9 +20,9 @@ import {
   endOfYear,
   format,
 } from "date-fns";
-import { useReturnStore } from "../../store/useReturnStore"; // Store mới tạo
-import { useProductStore } from "../../store/useProductStore"; // Lấy Warehouse
-import { usePurchaseOrderStore } from "../../store/usePurchaseOrderStore"; // Lấy Staff/Supplier
+import { useReturnStore } from "../../store/useReturnStore";
+import { useProductStore } from "../../store/useProductStore";
+import { usePurchaseOrderStore } from "../../store/usePurchaseOrderStore";
 
 // --- TYPES & INTERFACES ---
 interface ReturnUIState {
@@ -31,7 +31,7 @@ interface ReturnUIState {
   timePreset: "week" | "month" | "year" | "custom";
   dateRange: { from: string; to: string };
   creatorIds: string[];
-  partnerIds: string[]; // Người trả (NCC)
+  partnerIds: string[]; // Khách hàng
 }
 
 // --- SUB COMPONENTS (Tái sử dụng) ---
@@ -109,7 +109,7 @@ function MultiSelectSection({
               >
                 <input
                   type="checkbox"
-                  checked={selectedIds?.includes(opt.id.toString())} // Convert to string để so sánh an toàn
+                  checked={selectedIds?.includes(opt.id.toString())}
                   onChange={(e) =>
                     onChange(opt.id.toString(), e.target.checked)
                   }
@@ -144,8 +144,8 @@ export default function ReturnFilter({
   onToggle,
 }: ReturnFilterProps) {
   const { setFilters } = useReturnStore();
-  const { filterOptions: productOptions } = useProductStore(); // Lấy Warehouses
-  const { filterOptions: purchaseOptions } = usePurchaseOrderStore(); // Lấy Staffs, Suppliers
+  const { filterOptions: productOptions } = useProductStore();
+  const { filterOptions: purchaseOptions } = usePurchaseOrderStore();
 
   const [localFilters, setLocalFilters] = useState<ReturnUIState>({
     branchIds: [],
@@ -179,7 +179,7 @@ export default function ReturnFilter({
           localFilters.partnerIds.length > 0
             ? localFilters.partnerIds
             : undefined,
-        page: 1, // Reset về trang 1 khi filter thay đổi
+        page: 1,
       });
     }, 500);
     return () => clearTimeout(timer);
@@ -263,7 +263,7 @@ export default function ReturnFilter({
           <div className="flex items-center gap-2 mb-4 text-gray-800 pb-2 border-b border-gray-100">
             <Filter size={18} className="text-blue-600" />
             <h3 className="font-bold text-lg whitespace-nowrap">
-              Trả hàng nhập
+              Khách trả hàng
             </h3>
             <button
               onClick={() => window.location.reload()}
@@ -275,7 +275,7 @@ export default function ReturnFilter({
 
           {/* 1. Chi nhánh */}
           <MultiSelectSection
-            title="Chi nhánh"
+            title="Chi nhánh nhận"
             placeholder="Chọn chi nhánh"
             options={
               productOptions?.locations?.map((w: any) => ({
@@ -293,8 +293,7 @@ export default function ReturnFilter({
           <FilterSection title="Trạng thái" isOpen>
             <div className="flex flex-wrap gap-2">
               {[
-                { id: "draft", label: "Phiếu tạm" },
-                { id: "completed", label: "Đã trả hàng" },
+                { id: "completed", label: "Đã hoàn tất" },
                 { id: "cancelled", label: "Đã hủy" },
               ].map((st) => (
                 <button
@@ -339,48 +338,50 @@ export default function ReturnFilter({
                   </span>
                 </label>
               ))}
-              <div className="mt-2 grid grid-cols-2 gap-2 animate-in fade-in bg-gray-50 p-2 rounded border border-gray-200">
-                <div className="space-y-1">
-                  <span className="text-[10px] text-gray-500 uppercase font-semibold">
-                    Từ ngày
-                  </span>
-                  <input
-                    type="date"
-                    value={localFilters.dateRange.from}
-                    onChange={(e) =>
-                      setLocalFilters((p) => ({
-                        ...p,
-                        timePreset: "custom",
-                        dateRange: { ...p.dateRange, from: e.target.value },
-                      }))
-                    }
-                    className="w-full text-[10px] p-1 border rounded focus:border-blue-500 bg-white"
-                  />
+              {localFilters.timePreset === "custom" && (
+                <div className="mt-2 grid grid-cols-2 gap-2 animate-in fade-in bg-gray-50 p-2 rounded border border-gray-200">
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-gray-500 uppercase font-semibold">
+                      Từ ngày
+                    </span>
+                    <input
+                      type="date"
+                      value={localFilters.dateRange.from}
+                      onChange={(e) =>
+                        setLocalFilters((p) => ({
+                          ...p,
+                          timePreset: "custom",
+                          dateRange: { ...p.dateRange, from: e.target.value },
+                        }))
+                      }
+                      className="w-full text-[10px] p-1 border rounded focus:border-blue-500 bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-gray-500 uppercase font-semibold">
+                      Đến ngày
+                    </span>
+                    <input
+                      type="date"
+                      value={localFilters.dateRange.to}
+                      onChange={(e) =>
+                        setLocalFilters((p) => ({
+                          ...p,
+                          timePreset: "custom",
+                          dateRange: { ...p.dateRange, to: e.target.value },
+                        }))
+                      }
+                      className="w-full text-[10px] p-1 border rounded focus:border-blue-500 bg-white"
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-gray-500 uppercase font-semibold">
-                    Đến ngày
-                  </span>
-                  <input
-                    type="date"
-                    value={localFilters.dateRange.to}
-                    onChange={(e) =>
-                      setLocalFilters((p) => ({
-                        ...p,
-                        timePreset: "custom",
-                        dateRange: { ...p.dateRange, to: e.target.value },
-                      }))
-                    }
-                    className="w-full text-[10px] p-1 border rounded focus:border-blue-500 bg-white"
-                  />
-                </div>
-              </div>
+              )}
             </div>
           </FilterSection>
 
           {/* 4. Người tạo (Staff) */}
           <MultiSelectSection
-            title="Người tạo"
+            title="Người nhận trả"
             placeholder="Chọn người tạo"
             options={
               purchaseOptions?.staffs?.map((s: any) => ({
@@ -394,14 +395,14 @@ export default function ReturnFilter({
             }
           />
 
-          {/* 5. Người trả (NCC/Partner) */}
+          {/* 5. Khách hàng */}
           <MultiSelectSection
-            title="Người trả"
-            placeholder="Chọn người trả"
+            title="Khách hàng"
+            placeholder="Chọn khách hàng"
             options={
-              productOptions?.suppliers?.map((s: any) => ({
-                id: s.id,
-                label: s.name,
+              productOptions?.customers?.map((c: any) => ({
+                id: c.id,
+                label: c.name,
               })) || []
             }
             selectedIds={localFilters.partnerIds}

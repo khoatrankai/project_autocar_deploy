@@ -71,7 +71,7 @@ export class ReturnsService {
           partner_id: BigInt(dto.partner_id),
           total_refund: totalRefund,
           reason: dto.reason,
-          status: dto.status || 'completed', // Thường tạo xong là hoàn thành luôn
+          status: dto.status || 'pending', // Thường tạo xong là hoàn thành luôn
         },
       });
 

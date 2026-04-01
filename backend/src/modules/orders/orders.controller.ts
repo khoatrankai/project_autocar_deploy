@@ -114,8 +114,9 @@ export class OrdersController {
   findAll(
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('search') search?: string,
   ) {
-    return this.ordersService.findAll({ startDate, endDate });
+    return this.ordersService.findAll({ startDate, endDate, search });
   }
 
   @Get('daily-sales')

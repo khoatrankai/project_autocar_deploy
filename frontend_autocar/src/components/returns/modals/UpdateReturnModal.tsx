@@ -1,27 +1,15 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {
-  X,
-  Loader2,
-  Plus,
-  Trash2,
-  Search,
-  FileSpreadsheet,
-  Upload,
-  Check,
-} from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { X, Loader2, Plus, Trash2, Search, Check, Save } from "lucide-react";
+import { useState, useEffect } from "react";
 import { toast } from "react-hot-toast";
-import { Modal, Select } from "antd"; // 👉 Thêm Select từ antd
-import * as ExcelJS from "exceljs";
-import { saveAs } from "file-saver";
+import { Modal, Select } from "antd";
 
 // Import Stores & Services
 import { useProductStore } from "../../../store/useProductStore";
 import { returnService } from "../../../services/returnService";
 import { productService } from "../../../services/productService";
-import { orderService } from "../../../services/orderService"; // 👉 Import orderService
+import { orderService } from "../../../services/orderService";
 
 interface ReturnItem {
   product_id: number;
@@ -35,18 +23,22 @@ interface ReturnItem {
 
 interface Props {
   isOpen: boolean;
+  returnId: string | number | null;
   onClose: () => void;
   onSuccess?: () => void;
 }
 
-export default function CreateReturnModal({
+export default function UpdateReturnModal({
   isOpen,
+  returnId,
   onClose,
   onSuccess,
 }: Props) {
   const { filterOptions: productOptions, fetchFilterOptions } =
     useProductStore();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // State lưu trạng thái GỐC từ DB để khóa form
+  const [originalStatus, setOriginalStatus] = useState("");
 
   // Form State
   const [formData, setFormData] = useState({
@@ -54,61 +46,111 @@ export default function CreateReturnModal({
     order_id: "",
     code: "",
     reason: "",
+    status: "draft",
   });
 
   const [items, setItems] = useState<ReturnItem[]>([]);
   const [productSearch, setProductSearch] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
 
-  // 👉 STATES TÌM KIẾM ĐƠN HÀNG (ORDER)
+  const [isLoadingFetch, setIsLoadingFetch] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // States tìm kiếm đơn gốc
   const [orderSearchTerm, setOrderSearchTerm] = useState("");
   const [orderOptions, setOrderOptions] = useState<
     { value: string; label: string }[]
   >([]);
   const [isFetchingOrders, setIsFetchingOrders] = useState(false);
 
+  // Init Data & Lấy chi tiết phiếu
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && returnId) {
       fetchFilterOptions();
+      fetchReturnDetails();
+      setOrderSearchTerm("");
+    } else {
       setItems([]);
       setFormData({
         partner_id: "",
         order_id: "",
-        code: `TH-${Date.now()}`,
+        code: "",
         reason: "",
+        status: "draft",
       });
-      setOrderSearchTerm(""); // Reset search đơn hàng
+      setOriginalStatus("");
     }
-  }, [isOpen]);
+  }, [isOpen, returnId]);
 
-  // --- EFFECT: TÌM KIẾM ĐƠN HÀNG QUA API ---
+  const fetchReturnDetails = async () => {
+    setIsLoadingFetch(true);
+    try {
+      const res: any = await returnService.getOne(returnId as string);
+      const data = res?.data?.data || res?.data || res;
+
+      setOriginalStatus(data.status || "draft");
+
+      setFormData({
+        partner_id: data.partner_id ? data.partner_id.toString() : "",
+        order_id: data.order_id ? data.order_id.toString() : "",
+        code: data.code || "",
+        reason: data.reason || "",
+        status: data.status || "draft",
+      });
+
+      // Map lại Order ban đầu vào Select (nếu có)
+      if (data.order_id) {
+        setOrderOptions([
+          { value: data.order_id.toString(), label: `Đơn #${data.order_id}` },
+        ]);
+      }
+
+      // Lấy danh sách sản phẩm trả (items hoặc return_items tùy backend)
+      const itemsList = data.items || data.return_items || [];
+      if (itemsList.length > 0) {
+        const mappedItems: ReturnItem[] = itemsList.map((item: any) => ({
+          product_id: Number(item.product_id),
+          sku: item.products?.sku || item.product_sku || "---",
+          name: item.products?.name || item.product_name || "---",
+          quantity: Number(item.quantity),
+          refund_price: Number(item.refund_price),
+          unit: item.products?.unit || "Cái",
+        }));
+        setItems(mappedItems);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Không tải được chi tiết phiếu trả");
+      onClose();
+    } finally {
+      setIsLoadingFetch(false);
+    }
+  };
+
+  // --- EFFECT: TÌM KIẾM ĐƠN GỐC ---
   useEffect(() => {
     const timer = setTimeout(async () => {
       setIsFetchingOrders(true);
       try {
         const res = await orderService.getAll({ search: orderSearchTerm });
-        // Tùy cấu trúc trả về của API, thông thường là res.data hoặc res.data.data
         const ordersList = res.data?.data || res.data || [];
-
-        // Map dữ liệu để đưa vào Select (value là ID, label là Mã code)
         setOrderOptions(
           ordersList.map((o: any) => ({
-            value: o.id.toString(), // Antd Select chuộng value là string
-            label: o.code || `Đơn #${o.id}`, // Hiển thị mã đơn
+            value: o.id.toString(),
+            label: o.code || `Đơn #${o.id}`,
           })),
         );
       } catch (error) {
-        console.error("Lỗi khi tải danh sách đơn hàng:", error);
+        console.error(error);
       } finally {
         setIsFetchingOrders(false);
       }
-    }, 300); // Debounce 300ms
+    }, 300);
     return () => clearTimeout(timer);
   }, [orderSearchTerm]);
 
-  // --- EFFECT: TÌM KIẾM SẢN PHẨM ---
+  // --- EFFECT: TÌM SẢN PHẨM MỚI ---
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (productSearch.trim().length > 1) {
@@ -145,7 +187,6 @@ export default function CreateReturnModal({
       refund_price:
         Number(product.retail_price) || Number(product.cost_price) || 0,
       unit: product.unit || "Cái",
-      image_url: product.image_url,
     };
     setItems([...items, newItem]);
     setProductSearch("");
@@ -170,128 +211,23 @@ export default function CreateReturnModal({
     setItems(newItems);
   };
 
-  // --- EXCEL LOGIC ---
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const workbook = new ExcelJS.Workbook();
-    const reader = new FileReader();
-
-    reader.onload = async () => {
-      try {
-        const buffer = reader.result as ArrayBuffer;
-        await workbook.xlsx.load(buffer);
-        const worksheet = workbook.getWorksheet(1);
-
-        if (!worksheet) return toast.error("File Excel không hợp lệ");
-
-        const newItems: ReturnItem[] = [];
-        const skuSet = new Set(items.map((i) => i.sku));
-        const promises: Promise<void>[] = [];
-
-        worksheet.eachRow((row, rowNumber) => {
-          if (rowNumber === 1) return;
-          const sku = row.getCell(2).text?.toString().trim();
-          const quantity = Number(row.getCell(5).value) || 1;
-          const price = Number(row.getCell(6).value) || 0;
-
-          if (sku && !skuSet.has(sku)) {
-            const p = productService
-              .getProducts({ search: sku, limit: 1, page: 1 })
-              .then((res) => {
-                const product = res.data?.data?.find((p: any) => p.sku === sku);
-                if (product) {
-                  newItems.push({
-                    product_id: Number(product.id),
-                    sku: product.sku,
-                    name: product.name,
-                    quantity: quantity,
-                    refund_price:
-                      price > 0 ? price : Number(product.retail_price) || 0,
-                    unit: product.unit || "Cái",
-                    image_url: product.image_url,
-                  });
-                  skuSet.add(sku);
-                }
-              })
-              .catch((err) => console.error(`Lỗi SKU ${sku}`, err));
-            promises.push(p);
-          }
-        });
-
-        toast.loading("Đang xử lý dữ liệu...");
-        await Promise.all(promises);
-        toast.dismiss();
-
-        if (newItems.length > 0) {
-          setItems((prev) => [...prev, ...newItems]);
-          toast.success(`Đã thêm ${newItems.length} sản phẩm`);
-        } else {
-          toast("Không tìm thấy sản phẩm hợp lệ.");
-        }
-      } catch (error) {
-        toast.error("Lỗi đọc file Excel");
-      } finally {
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const handleDownloadTemplate = async () => {
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Mau_Nhan_Hang_Tra");
-    worksheet.columns = [
-      { header: "STT", key: "stt", width: 5 },
-      { header: "Mã hàng (*)", key: "sku", width: 20 },
-      { header: "Tên hàng", key: "name", width: 35 },
-      { header: "ĐVT", key: "unit", width: 10 },
-      { header: "SL (*)", key: "quantity", width: 10 },
-      { header: "Giá hoàn trả (Giá bán)", key: "price", width: 20 },
-      { header: "Thành tiền", key: "total", width: 15 },
-    ];
-
-    const headerRow = worksheet.getRow(1);
-    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    headerRow.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: "FF0070C0" },
-    };
-
-    const sampleData = [
-      {
-        stt: 1,
-        sku: "SP001",
-        name: "Sản phẩm A",
-        unit: "Cái",
-        quantity: 1,
-        price: 150000,
-      },
-    ];
-    sampleData.forEach((row) =>
-      worksheet.addRow({ ...row, total: row.quantity * row.price }),
-    );
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
-    saveAs(blob, "Mau_Nhan_Hang_Tra.xlsx");
-  };
-
   const totalRefund = items.reduce(
     (sum, item) => sum + item.quantity * item.refund_price,
     0,
   );
 
-  const handleSubmit = async () => {
+  // Khóa form nếu trạng thái gốc là hoàn thành
+  const isReadOnly =
+    originalStatus === "completed" || originalStatus === "cancelled";
+
+  // --- SUBMIT ---
+  const handleSubmit = async (submitStatus: string) => {
+    if (isReadOnly) return toast.error("Phiếu đã khóa, không thể chỉnh sửa!");
     if (!formData.code) return toast.error("Mã trả hàng không được để trống");
     if (items.length === 0)
       return toast.error("Vui lòng chọn ít nhất 1 sản phẩm");
 
-    setIsLoading(true);
+    setIsSubmitting(true);
     try {
       const payload = {
         code: formData.code,
@@ -300,6 +236,7 @@ export default function CreateReturnModal({
           : undefined,
         order_id: formData.order_id ? Number(formData.order_id) : undefined,
         reason: formData.reason,
+        status: submitStatus, // Gửi trạng thái mới xuống
         items: items.map((i) => ({
           product_id: i.product_id,
           quantity: i.quantity,
@@ -307,16 +244,35 @@ export default function CreateReturnModal({
         })),
       };
 
-      await returnService.create(payload);
-      toast.success("Đã ghi nhận hàng trả lại thành công!");
+      await returnService.update(returnId as string, payload);
+      toast.success("Cập nhật phiếu trả hàng thành công!");
       if (onSuccess) onSuccess();
       onClose();
     } catch (error: any) {
-      toast.error(error?.response?.data?.message || "Lỗi xử lý");
+      toast.error(error?.response?.data?.message || "Lỗi cập nhật phiếu");
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
+
+  if (isLoadingFetch) {
+    return (
+      <Modal
+        open={isOpen}
+        footer={null}
+        closable={false}
+        className="full-screen-modal p-0"
+        width="100vw"
+      >
+        <div className="h-screen w-full flex items-center justify-center bg-gray-50 flex-col gap-3">
+          <Loader2 className="animate-spin text-blue-600" size={40} />
+          <p className="text-gray-500 font-medium">
+            Đang tải dữ liệu phiếu trả...
+          </p>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -338,72 +294,65 @@ export default function CreateReturnModal({
             >
               <X size={20} />
             </button>
-            <h2 className="text-lg font-bold text-gray-800">
-              Nhận hàng trả từ khách
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              Sửa Phiếu Trả Hàng:{" "}
+              <span className="text-blue-600 font-mono">{formData.code}</span>
             </h2>
           </div>
 
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px]">
-            <div className="relative group">
-              <Search
-                className="absolute left-3 top-2.5 text-gray-400"
-                size={18}
-              />
-              <input
-                autoFocus
-                type="text"
-                placeholder="Tìm sản phẩm khách trả lại (F3)"
-                className="w-full pl-10 pr-12 py-2 border rounded shadow-sm outline-none focus:border-blue-500 bg-gray-50 focus:bg-white text-sm"
-                value={productSearch}
-                onChange={(e) => setProductSearch(e.target.value)}
-              />
-              {isSearching && (
-                <Loader2
-                  className="absolute right-2.5 top-2.5 animate-spin text-blue-600"
+          {/* Search Bar - Chỉ hiện nếu chưa hoàn thành */}
+          {!isReadOnly && (
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px]">
+              <div className="relative group">
+                <Search
+                  className="absolute left-3 top-2.5 text-gray-400"
                   size={18}
                 />
-              )}
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Tìm sản phẩm khách trả lại (F3)"
+                  className="w-full pl-10 pr-12 py-2 border rounded shadow-sm outline-none focus:border-blue-500 bg-gray-50 focus:bg-white text-sm"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                />
+                {isSearching && (
+                  <Loader2
+                    className="absolute right-2.5 top-2.5 animate-spin text-blue-600"
+                    size={18}
+                  />
+                )}
 
-              {searchResults.length > 0 && (
-                <div className="absolute top-full left-0 w-full bg-white border rounded-b shadow-xl max-h-[400px] overflow-y-auto mt-1 z-50">
-                  {searchResults.map((prod) => (
-                    <div
-                      key={prod.id}
-                      onClick={() => handleAddItem(prod)}
-                      className="flex items-center gap-3 p-3 hover:bg-blue-50 cursor-pointer border-b"
-                    >
-                      <div className="w-10 h-10 bg-gray-100 rounded overflow-hidden">
-                        {prod.image_url ? (
-                          <img
-                            src={prod.image_url}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <span className="text-[10px] text-gray-400 flex justify-center items-center h-full">
-                            IMG
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between">
-                          <span className="font-medium text-gray-800">
-                            {prod.name}
-                          </span>
-                          <span className="font-bold text-blue-600">
-                            {Number(prod.retail_price || 0).toLocaleString()} ₫
-                          </span>
+                {searchResults.length > 0 && (
+                  <div className="absolute top-full left-0 w-full bg-white border rounded-b shadow-xl max-h-[400px] overflow-y-auto mt-1 z-50">
+                    {searchResults.map((prod) => (
+                      <div
+                        key={prod.id}
+                        onClick={() => handleAddItem(prod)}
+                        className="flex items-center gap-3 p-3 hover:bg-blue-50 cursor-pointer border-b"
+                      >
+                        <div className="flex-1">
+                          <div className="flex justify-between">
+                            <span className="font-medium text-gray-800">
+                              {prod.name}
+                            </span>
+                            <span className="font-bold text-blue-600">
+                              {Number(prod.retail_price || 0).toLocaleString()}{" "}
+                              ₫
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            SKU: {prod.sku}
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          SKU: {prod.sku}
-                        </div>
+                        <Plus className="text-blue-600" />
                       </div>
-                      <Plus className="text-blue-600" />
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* === BODY === */}
@@ -422,36 +371,8 @@ export default function CreateReturnModal({
 
             <div className="flex-1 overflow-y-auto">
               {items.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-4">
-                  <FileSpreadsheet
-                    size={64}
-                    className="text-gray-300"
-                    strokeWidth={1}
-                  />
-                  <div className="text-center">
-                    <p className="font-medium text-lg text-gray-700">
-                      Chưa có sản phẩm trả lại
-                    </p>
-                    <p
-                      className="text-sm text-blue-500 cursor-pointer hover:underline"
-                      onClick={handleDownloadTemplate}
-                    >
-                      (Hoặc tải lên từ File Excel)
-                    </p>
-                  </div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    className="hidden"
-                    onChange={handleFileChange}
-                    accept=".xlsx,.xls"
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded font-medium"
-                  >
-                    <Upload size={18} /> Import từ Excel
-                  </button>
+                <div className="flex items-center justify-center h-full text-gray-400">
+                  Chưa có sản phẩm nào
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
@@ -476,7 +397,8 @@ export default function CreateReturnModal({
                         <input
                           type="number"
                           min="1"
-                          className="w-full text-center border-b outline-none py-1 font-bold text-blue-600"
+                          disabled={isReadOnly}
+                          className="w-full text-center border-b outline-none py-1 font-bold text-blue-600 disabled:bg-transparent disabled:border-none"
                           value={item.quantity}
                           onChange={(e) =>
                             handleUpdateItem(
@@ -490,7 +412,8 @@ export default function CreateReturnModal({
                       <div className="col-span-2 text-right">
                         <input
                           type="text"
-                          className="w-full text-right border-b outline-none py-1"
+                          disabled={isReadOnly}
+                          className="w-full text-right border-b outline-none py-1 disabled:bg-transparent disabled:border-none"
                           value={
                             item.refund_price
                               ? item.refund_price.toLocaleString("vi-VN")
@@ -509,12 +432,14 @@ export default function CreateReturnModal({
                         <span className="font-bold text-gray-800">
                           {(item.quantity * item.refund_price).toLocaleString()}
                         </span>
-                        <button
-                          onClick={() => handleRemoveItem(idx)}
-                          className="text-gray-400 hover:text-red-500"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        {!isReadOnly && (
+                          <button
+                            onClick={() => handleRemoveItem(idx)}
+                            className="text-gray-400 hover:text-red-500"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -530,19 +455,17 @@ export default function CreateReturnModal({
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600 font-bold">Mã phiếu</span>
                   <input
-                    className="w-44 text-right border-b focus:border-blue-500 outline-none py-1 font-mono text-blue-600 font-bold"
-                    placeholder="Mã phiếu..."
+                    disabled
+                    className="w-44 text-right border-none outline-none py-1 font-mono text-gray-500 bg-transparent"
                     value={formData.code}
-                    onChange={(e) =>
-                      setFormData({ ...formData, code: e.target.value })
-                    }
                   />
                 </div>
 
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600 font-bold">Khách hàng</span>
                   <select
-                    className="w-44 text-right border-b outline-none bg-transparent py-1 cursor-pointer"
+                    disabled={isReadOnly}
+                    className="w-44 text-right border-b outline-none bg-transparent py-1 disabled:opacity-70 disabled:border-none cursor-pointer"
                     value={formData.partner_id}
                     onChange={(e) =>
                       setFormData({ ...formData, partner_id: e.target.value })
@@ -557,13 +480,13 @@ export default function CreateReturnModal({
                   </select>
                 </div>
 
-                {/* 👉 THAY ĐỔI COMPONENT CHỌN MÃ ĐƠN MUA BẰNG ANTD SELECT */}
                 <div className="flex justify-between items-center text-sm border-b border-dashed border-gray-100 pb-2">
                   <span className="text-gray-600 font-bold">Mã đơn gốc</span>
                   <div className="w-44">
                     <Select
                       showSearch
                       allowClear
+                      disabled={isReadOnly}
                       variant="borderless"
                       placeholder="Tìm mã đơn hàng..."
                       className="w-full text-right border-b border-gray-200 focus-within:border-blue-500"
@@ -572,7 +495,7 @@ export default function CreateReturnModal({
                       onChange={(value) =>
                         setFormData({ ...formData, order_id: value || "" })
                       }
-                      filterOption={false} // Tắt auto filter của Antd vì ta filter qua API
+                      filterOption={false}
                       loading={isFetchingOrders}
                       options={orderOptions}
                       notFoundContent={
@@ -609,7 +532,8 @@ export default function CreateReturnModal({
                 </label>
                 <textarea
                   rows={4}
-                  className="w-full border rounded p-2 text-sm outline-none focus:border-blue-500 resize-none"
+                  disabled={isReadOnly}
+                  className="w-full border rounded p-2 text-sm outline-none focus:border-blue-500 resize-none disabled:bg-gray-50"
                   placeholder="Ví dụ: Lỗi kỹ thuật, đổi ý..."
                   value={formData.reason}
                   onChange={(e) =>
@@ -619,20 +543,31 @@ export default function CreateReturnModal({
               </div>
             </div>
 
-            <div className="p-4 border-t bg-gray-50 flex gap-3">
-              <button
-                onClick={handleSubmit}
-                disabled={isLoading}
-                className="w-full bg-blue-600 text-white py-3 rounded font-bold hover:bg-blue-700 transition-colors shadow-sm text-sm disabled:opacity-70 flex justify-center items-center"
-              >
-                {isLoading ? (
-                  <Loader2 size={18} className="mr-2 animate-spin" />
-                ) : (
-                  <Check size={18} className="mr-2" />
-                )}
-                Lưu & Nhập kho
-              </button>
-            </div>
+            {/* ACTION BUTTONS */}
+            {!isReadOnly ? (
+              <div className="p-4 border-t bg-gray-50 flex gap-3">
+                <button
+                  onClick={() => handleSubmit("draft")}
+                  disabled={isSubmitting}
+                  className="flex-1 bg-white border border-blue-600 text-blue-600 py-2.5 rounded font-bold hover:bg-blue-50 transition-colors shadow-sm text-sm disabled:opacity-70 flex justify-center items-center"
+                >
+                  <Save size={16} className="mr-2" /> Lưu tạm
+                </button>
+                <button
+                  onClick={() => handleSubmit("completed")}
+                  disabled={isSubmitting}
+                  className="flex-1 bg-blue-600 text-white py-2.5 rounded font-bold hover:bg-blue-700 transition-colors shadow-sm text-sm disabled:opacity-70 flex justify-center items-center"
+                >
+                  <Check size={16} className="mr-2" /> Hoàn thành
+                </button>
+              </div>
+            ) : (
+              <div className="p-4 border-t bg-red-50 text-center">
+                <p className="text-sm font-bold text-red-600">
+                  Phiếu trả hàng này đã hoàn tất, không thể chỉnh sửa!
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

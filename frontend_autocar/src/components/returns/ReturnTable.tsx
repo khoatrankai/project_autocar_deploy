@@ -16,11 +16,11 @@ import {
   Upload,
   Printer,
   ExternalLink,
-  Edit,
   MoreHorizontal,
   XCircle,
   ChevronDown,
   ChevronUp,
+  Edit,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Dropdown } from "antd";
@@ -29,19 +29,18 @@ import type { MenuProps } from "antd";
 // --- IMPORT COMPONENTS ---
 import { useReturnStore } from "../../store/useReturnStore";
 import CreateReturnModal from "./modals/CreateReturnModal";
-// Bạn cần tạo thêm ReturnDetailPanel tương tự StockTransferDetailPanel
-// import CreateReturnModal from "./modals/CreateReturnModal"; // (Tạo sau)
+import ReturnDetailPanel from "./modals/ReturnDetailPanel";
+import UpdateReturnModal from "./modals/UpdateReturnModal";
+// Import filter component nếu bạn để ở file ngoài (tuỳ cấu trúc của bạn)
+// import ReturnFilter from "./ReturnFilter";
 
-// --- CẤU HÌNH CỘT ---
+// --- CẤU HÌNH CỘT CHUẨN MODEL ---
 const COLUMN_CONFIG = [
   { key: "code", label: "Mã trả hàng", default: true },
   { key: "created_at", label: "Thời gian", default: true },
-  { key: "partner", label: "Nhà cung cấp", default: true },
-  { key: "total_refund", label: "Tổng tiền hàng", default: true },
-  // Các cột giả định (chưa có trong model returns gốc nhưng có trong hình)
-  { key: "discount", label: "Giảm giá", default: true },
-  { key: "must_pay", label: "NCC cần trả", default: true },
-  { key: "paid", label: "NCC đã trả", default: true },
+  { key: "partner", label: "Khách hàng", default: true },
+  { key: "reason", label: "Lý do trả", default: true },
+  { key: "total_refund", label: "Hoàn tiền", default: true },
   { key: "status", label: "Trạng thái", default: true },
   { key: "actions", label: "", default: true },
 ];
@@ -61,6 +60,7 @@ export default function ReturnTable() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [localSearch, setLocalSearch] = useState(filters.search || "");
+  const [updateId, setUpdateId] = useState<string | null>(null);
 
   // State Selection & Expand
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -102,8 +102,10 @@ export default function ReturnTable() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (localSearch !== filters.search)
-        setFilters({ search: localSearch, page: 1 });
+        setFilters({ search: localSearch, page: 0 });
     }, 500);
+    // return () => clearTimeout(timer);
+    fetchReturns();
     return () => clearTimeout(timer);
   }, [localSearch, filters.search, setFilters]);
 
@@ -143,30 +145,46 @@ export default function ReturnTable() {
   };
 
   // --- MENU ACTIONS ---
-  const getActionMenu = (record: any): MenuProps => ({
-    items: [
+  const getActionMenu = (record: any): MenuProps => {
+    // 1. Mặc định luôn có nút Xem chi tiết và In phiếu
+    const menuItems: any[] = [
       {
         key: "view",
         label: "Xem chi tiết",
         icon: <ExternalLink size={16} />,
-        onClick: () => handleToggleExpand(record.id),
+        onClick: () => handleToggleExpand(record.id), // Tùy logic xem chi tiết của bạn
       },
-      { key: "print", label: "In phiếu", icon: <Printer size={16} /> },
-      ...(record.status === "pending" || record.status === "draft"
-        ? [
-            { key: "edit", label: "Sửa phiếu", icon: <Edit size={16} /> },
-            { type: "divider" as const },
-            {
-              key: "delete",
-              label: <span className="text-red-600">Hủy phiếu</span>,
-              icon: <XCircle size={16} className="text-red-600" />,
-              danger: true,
-              onClick: () => handleDelete(record.id),
-            },
-          ]
-        : []),
-    ],
-  });
+      {
+        key: "print",
+        label: "In phiếu",
+        icon: <Printer size={16} />,
+      },
+    ];
+
+    // 2. NẾU phiếu CHƯA hoàn tất, thì nhét thêm nút Sửa và Xóa vào menu
+    if (record.status !== "completed") {
+      menuItems.push({ type: "divider" }); // Đường kẻ ngang phân cách
+
+      // Nút Sửa
+      menuItems.push({
+        key: "edit",
+        label: "Sửa phiếu",
+        icon: <Edit size={16} />,
+        onClick: () => setUpdateId(record.id), // 👉 Gắn ID để mở form Update
+      });
+
+      // Nút Xóa
+      menuItems.push({
+        key: "delete",
+        label: <span className="text-red-600">Xóa phiếu</span>,
+        icon: <XCircle size={16} className="text-red-600" />,
+        danger: true,
+        onClick: () => handleDelete(record.id),
+      });
+    }
+
+    return { items: menuItems };
+  };
 
   const formatMoney = (amount: number) =>
     new Intl.NumberFormat("vi-VN", {
@@ -209,7 +227,7 @@ export default function ReturnTable() {
           <div className="relative w-96">
             <input
               type="text"
-              placeholder="Tìm theo mã phiếu, NCC..."
+              placeholder="Tìm theo mã phiếu, tên khách hàng..."
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 rounded border border-gray-300 focus:border-blue-500 outline-none text-sm"
@@ -227,9 +245,9 @@ export default function ReturnTable() {
             )}
             <button
               onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium text-sm"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-medium text-sm shadow-sm"
             >
-              <Plus size={16} /> <span>Trả hàng</span>
+              <Plus size={16} /> <span>Nhận hàng trả</span>
             </button>
             <button className="flex items-center gap-2 px-3 py-2 bg-white text-gray-700 border rounded hover:bg-gray-50 text-sm">
               <Upload size={16} />
@@ -293,7 +311,7 @@ export default function ReturnTable() {
               )}
 
               <table className="w-full text-sm text-left border-collapse">
-                <thead className="text-xs text-gray-500 uppercase bg-[#f9fafb] border-b border-gray-200 sticky top-0 z-10">
+                <thead className="text-xs text-gray-500 uppercase bg-[#f9fafb] border-b border-gray-200 sticky top-0 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
                   <tr>
                     <th className="p-4 w-10 text-center">
                       <input
@@ -309,7 +327,7 @@ export default function ReturnTable() {
                     <th className="p-4 w-8 text-center"></th>
                     {visibleColumns.code && (
                       <th className="p-4 font-semibold text-gray-600">
-                        Mã trả hàng
+                        Mã phiếu
                       </th>
                     )}
                     {visibleColumns.created_at && (
@@ -319,27 +337,15 @@ export default function ReturnTable() {
                     )}
                     {visibleColumns.partner && (
                       <th className="p-4 font-semibold text-gray-600">
-                        Nhà cung cấp
+                        Khách hàng
                       </th>
+                    )}
+                    {visibleColumns.reason && (
+                      <th className="p-4 font-semibold text-gray-600">Lý do</th>
                     )}
                     {visibleColumns.total_refund && (
                       <th className="p-4 font-semibold text-gray-600 text-right">
-                        Tổng tiền hàng
-                      </th>
-                    )}
-                    {visibleColumns.discount && (
-                      <th className="p-4 font-semibold text-gray-600 text-right">
-                        Giảm giá
-                      </th>
-                    )}
-                    {visibleColumns.must_pay && (
-                      <th className="p-4 font-semibold text-gray-600 text-right">
-                        NCC cần trả
-                      </th>
-                    )}
-                    {visibleColumns.paid && (
-                      <th className="p-4 font-semibold text-gray-600 text-right">
-                        NCC đã trả
+                        Hoàn tiền
                       </th>
                     )}
                     {visibleColumns.status && (
@@ -391,31 +397,22 @@ export default function ReturnTable() {
                               </td>
                             )}
                             {visibleColumns.partner && (
-                              <td className="p-4 text-gray-800 font-medium uppercase text-xs">
-                                {item.partners?.name || "---"}
+                              <td className="p-4 text-gray-800 font-medium">
+                                {item.partners?.name || "Khách lẻ"}
+                              </td>
+                            )}
+                            {visibleColumns.reason && (
+                              <td
+                                className="p-4 text-gray-500 italic max-w-[200px] truncate"
+                                title={item.reason}
+                              >
+                                {item.reason || "---"}
                               </td>
                             )}
 
                             {visibleColumns.total_refund && (
-                              <td className="p-4 text-right font-mono font-bold text-gray-900">
+                              <td className="p-4 text-right font-mono font-bold text-red-600">
                                 {formatMoney(item.total_refund)}
-                              </td>
-                            )}
-
-                            {/* Các cột giả định: Giảm giá, Cần trả, Đã trả (Nếu model chưa có thì để 0) */}
-                            {visibleColumns.discount && (
-                              <td className="p-4 text-right text-gray-600">
-                                {formatMoney(0)}
-                              </td>
-                            )}
-                            {visibleColumns.must_pay && (
-                              <td className="p-4 text-right font-bold text-blue-600">
-                                {formatMoney(item.total_refund)}
-                              </td>
-                            )}
-                            {visibleColumns.paid && (
-                              <td className="p-4 text-right text-gray-600">
-                                {formatMoney(0)}
                               </td>
                             )}
 
@@ -431,7 +428,7 @@ export default function ReturnTable() {
                                   }`}
                                 >
                                   {item.status === "completed"
-                                    ? "Đã trả hàng"
+                                    ? "Đã hoàn tất"
                                     : item.status === "cancelled"
                                       ? "Đã hủy"
                                       : "Phiếu tạm"}
@@ -458,23 +455,26 @@ export default function ReturnTable() {
                             )}
                           </tr>
 
-                          {/* EXPANDED ROW */}
-                          {/* {expandedRowId === item.id && (
-                        <tr>
-                           <td colSpan={11} className="p-0 border-b-2 border-blue-100">
-                              <ReturnDetailPanel 
-                                 returnId={item.id} 
-                                 onClose={() => setExpandedRowId(null)}
-                              />
-                           </td>
-                        </tr>
-                      )} */}
+                          {/* EXPANDED ROW (Chờ tạo ReturnDetailPanel) */}
+                          {expandedRowId === item.id && (
+                            <tr>
+                              <td
+                                colSpan={7}
+                                className="p-0 border-b-2 border-blue-100"
+                              >
+                                <ReturnDetailPanel
+                                  returnId={item.id}
+                                  onClose={() => setExpandedRowId(null)}
+                                />
+                              </td>
+                            </tr>
+                          )}
                         </React.Fragment>
                       ))
                     : !isLoading && (
                         <tr>
                           <td
-                            colSpan={11}
+                            colSpan={9}
                             className="p-12 text-center text-gray-400"
                           >
                             Không tìm thấy dữ liệu
@@ -524,6 +524,17 @@ export default function ReturnTable() {
           fetchReturns();
         }}
       />
+      {updateId && (
+        <UpdateReturnModal
+          isOpen={!!updateId}
+          returnId={updateId}
+          onClose={() => setUpdateId(null)}
+          onSuccess={() => {
+            setUpdateId(null);
+            fetchReturns(); // Tải lại bảng
+          }}
+        />
+      )}
     </>
   );
 }

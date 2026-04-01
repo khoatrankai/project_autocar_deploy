@@ -112,12 +112,12 @@ export const useReturnStore = create<ReturnState>((set, get) => ({
       delete params.timePreset; // Không gửi field này lên server
 
       const res: any = await returnService.getAll(params);
-
+      console.log(res?.data?.data);
       // Map data từ response (cấu trúc trả về từ NestJS service hôm qua)
       set({
-        returns: res.data?.data || [],
-        total: res.data?.total || 0,
-        totalRefund: res.data?.totalRefund || 0,
+        returns: res?.data?.data?.data || [],
+        total: res.data?.data?.total || 0,
+        totalRefund: res.data?.data?.totalRefund || 0,
       });
     } catch (error) {
       console.error("Lỗi tải danh sách trả hàng:", error);
