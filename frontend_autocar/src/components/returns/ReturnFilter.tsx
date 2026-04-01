@@ -143,7 +143,7 @@ export default function ReturnFilter({
   isCollapsed,
   onToggle,
 }: ReturnFilterProps) {
-  const { setFilters } = useReturnStore();
+  const { setFilters, fetchReturns } = useReturnStore();
   const { filterOptions: productOptions } = useProductStore();
   const { filterOptions: purchaseOptions } = usePurchaseOrderStore();
 
@@ -162,6 +162,7 @@ export default function ReturnFilter({
   // Debounce submit filters
   useEffect(() => {
     const timer = setTimeout(() => {
+      // 1. Cập nhật filter vào Store trước
       setFilters({
         branchIds:
           localFilters.branchIds.length > 0
@@ -181,9 +182,13 @@ export default function ReturnFilter({
             : undefined,
         page: 1,
       });
+
+      // 2. Sau đó mới gọi API để lấy dữ liệu mới
+      fetchReturns(); // 👉 ĐÃ CHUYỂN VÀO ĐÂY
     }, 500);
+
     return () => clearTimeout(timer);
-  }, [localFilters, setFilters]);
+  }, [localFilters, setFilters, fetchReturns]);
 
   // --- Handlers ---
   const handleMultiSelectChange = (
