@@ -5,7 +5,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   Plus,
-  FileDown,
+  // FileDown,
   Settings,
   Search,
   LayoutGrid,
@@ -13,7 +13,7 @@ import {
   ChevronRight,
   Trash2,
   Loader2,
-  Upload,
+  // Upload,
   Printer,
   ExternalLink,
   MoreHorizontal,
